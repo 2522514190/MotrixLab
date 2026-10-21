@@ -1,0 +1,30 @@
+# @package _global_
+# Reuse the PPO task's Manager logic with Holosoma's finite tanh action bounds.
+# Algorithm: config_values/wbt/g1/experiment.py:g1_29dof_wbt_fast_sac_w_object.
+defaults:
+  - /algo_base@algo: motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-omniretarget-fastsac
+  rllib: motrix
+  algo: fastsac
+num_envs: 2048
+play_num_envs: 1
+seed: 1
+checkpoint:
+  interval: 1000
+algo:
+  agent:
+    gamma: 0.99
+    tau: 0.05
+    num_steps: 1
+    num_updates: 4
+    policy_frequency: 2
+    target_entropy_ratio: 0.5
+    num_atoms: 501
+  trainer:
+    # Match 4096 * 400000 Holosoma interactions; this does not equate updates
+    # or learning progress. 192000 iterations match PPO's 4000-iteration data.
+    num_learning_iterations: 800000
+    async_options:
+      utd_mode: strict

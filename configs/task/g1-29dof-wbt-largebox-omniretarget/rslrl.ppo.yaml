@@ -1,0 +1,49 @@
+# @package _global_
+# OmniRetarget IV cites BeyondMimic: Table S5 supplies PPO hyperparameters;
+# unspecified PPO settings follow Holosoma config_values/wbt/g1/experiment.py.
+defaults:
+  - /algo_base@algo: rslrl.ppo
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-omniretarget
+  rllib: rslrl
+  algo: ppo
+num_envs: 4096
+play_num_envs: 1
+seed: 1
+checkpoint:
+  interval: 4000
+algo:
+  num_steps_per_env: 24
+  max_iterations: 30000
+  obs_groups:
+    actor: [policy]
+    critic: [value]
+  actor:
+    hidden_dims: [512, 256, 128]
+    activation: elu
+    obs_normalization: true
+    init_noise_std: 1.0
+    noise_std_type: scalar
+    state_dependent_std: false
+  critic:
+    hidden_dims: [512, 256, 128]
+    activation: elu
+    obs_normalization: true
+  algorithm:
+    optimizer: adam
+    learning_rate: 0.001
+    num_learning_epochs: 5
+    num_mini_batches: 4
+    schedule: adaptive
+    value_loss_coef: 1.0
+    clip_param: 0.2
+    use_clipped_value_loss: true
+    desired_kl: 0.01
+    entropy_coef: 0.005
+    gamma: 0.99
+    lam: 0.95
+    max_grad_norm: 1.0
+    normalize_advantage_per_mini_batch: false
+    rnd_cfg: null
+    symmetry_cfg: null

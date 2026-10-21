@@ -79,3 +79,24 @@ def test_write_program_skips_empty_selection() -> None:
     _program(native).execute(numpy.asarray([], dtype=numpy.int64))
 
     assert native.execute_calls == []
+
+
+def test_inertia_write_preserves_unselected_lanes_after_native_reset() -> None:
+    class Link:
+        def __init__(self):
+            self.values = numpy.tile([1.0, 2.0, 2.0, 0.0, 0.0, 0.0], (3, 1))
+
+        def get_inertia_override(self, data):
+            return self.values
+
+        def set_inertia_override(self, data, values):
+            self.values = values.copy()
+
+    link = Link()
+    native = _NativeProgram()
+    values = numpy.tile([3.0, 4.0, 5.0, 0.0, 0.0, 0.0], (3, 1, 1))
+    program = _MotrixSimWriteProgram(_Data(), {"inertia": values}, native, {"inertia": (link,)})
+    program.execute(numpy.asarray([2, 0], dtype=numpy.int64))
+    numpy.testing.assert_array_equal(link.values[[0, 2]], values[[0, 2], 0])
+    numpy.testing.assert_array_equal(link.values[1], [1, 2, 2, 0, 0, 0])
+    assert native.execute_calls[0][1] == (0, 2)

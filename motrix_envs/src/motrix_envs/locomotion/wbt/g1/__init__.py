@@ -7,6 +7,6 @@ Importing a task module registers its env config and env class; these
 imports exist for that registration side effect.
 """
 
-from . import backflip, dance, largebox  # noqa: F401
+from . import backflip, dance, largebox, largebox_object, omniretarget, omniretarget_fastsac  # noqa: F401
 
-__all__ = ["backflip", "dance", "largebox"]
+__all__ = ["backflip", "dance", "largebox", "largebox_object", "omniretarget", "omniretarget_fastsac"]

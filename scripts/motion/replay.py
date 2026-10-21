@@ -28,9 +28,12 @@ from motrix_robots.dex_evt import DexEvt
 from motrix_robots.unitree import UnitreeG129Dof
 from motrixsim.render import RenderApp, RenderClosedError, RenderSettings
 
+from motrix_env_core.config import configclass
 from motrix_env_core.config.scene import (
+    BodyCfg,
     RobotCfg,
     SystemCameraCfg,
+    UrdfFileCfg,
 )
 from motrix_env_motrixsim.compiler import build_scene_model
 from motrix_envs.config.scene import StandardSceneCfg, StandardSceneObjsCfg
@@ -62,13 +65,32 @@ _START_STEP = flags.DEFINE_integer("start-step", 0, "Inclusive start frame index
 _END_STEP = flags.DEFINE_integer("end-step", None, "Exclusive end frame index; defaults to the last frame.")
 _LOOP = flags.DEFINE_bool("loop", False, "Loop the clip until the window is closed.")
 _SPEED = flags.DEFINE_float("speed", 1.0, "Playback speed multiplier (>0).", lower_bound=0.0)
+_SHOW_OBJECT = flags.DEFINE_bool("show-object", False, "Show the reference object when ext_object_* channels exist.")
 
 
-def build_replay_model(robot_cfg: RobotCfg) -> mtx.SceneModel:
+@configclass
+class ReplaySceneObjsCfg(StandardSceneObjsCfg):
+    box: BodyCfg | None = None
+
+
+def build_replay_model(robot_cfg: RobotCfg, *, show_object: bool = False) -> mtx.SceneModel:
     """Build a standard ground scene containing only the requested robot."""
     scene = StandardSceneCfg(
         system_camera=SystemCameraCfg(distance=6.0, elevation=-20.0, azimuth=180.0),
-        objs=StandardSceneObjsCfg(robot=robot_cfg),
+        objs=ReplaySceneObjsCfg(
+            robot=robot_cfg,
+            box=(
+                BodyCfg(
+                    model=UrdfFileCfg(
+                        file=Path(__file__).resolve().parents[2]
+                        / "motrix_envs/src/motrix_envs/locomotion/wbt/assets/objects/largebox/large_box.urdf"
+                    ),
+                    base_link_name="baseLink",
+                )
+                if show_object
+                else None
+            ),
+        ),
     )
     return build_scene_model(scene)
 
@@ -76,20 +98,29 @@ def build_replay_model(robot_cfg: RobotCfg) -> mtx.SceneModel:
 def _model_joint_indices(model: mtx.SceneModel, motion: MotrixMotion) -> np.ndarray:
     """Resolve motion joint columns into model order and validate free-root layout."""
     joint_names = [str(name) for name in model.joint_names]
-    expected_qpos = 7 + len(joint_names)
-    expected_qvel = 6 + len(joint_names)
-    if model.num_dof_pos != expected_qpos or model.num_dof_vel != expected_qvel:
+    expected_robot_qpos = 7 + len(joint_names)
+    expected_robot_qvel = 6 + len(joint_names)
+    if model.num_dof_pos not in (expected_robot_qpos, expected_robot_qpos + 7) or model.num_dof_vel not in (
+        expected_robot_qvel,
+        expected_robot_qvel + 6,
+    ):
         raise ValueError(
             "Replay requires a floating-base robot with one scalar DOF per named joint; "
             f"model has qpos/qvel widths {model.num_dof_pos}/{model.num_dof_vel}, "
-            f"expected {expected_qpos}/{expected_qvel}."
+            f"expected robot widths {expected_robot_qpos}/{expected_robot_qvel}."
         )
     return motion.joint_indices(joint_names)
 
 
 def _root_index(motion: MotrixMotion) -> int:
-    """Use explicit root metadata when available, else the schema's first body."""
-    root_body_name = motion.root_body_name or motion.body_names[0]
+    """Use explicit root metadata, or the robot pelvis for legacy clips."""
+    root_body_name = motion.root_body_name
+    if root_body_name is None:
+        # Older converted clips include a synthetic ``world`` body first;
+        # that body is not the robot floating base.  G1 clips use ``pelvis``
+        # as the root body, while retaining the first-body fallback for other
+        # legacy robot formats.
+        root_body_name = "pelvis" if "pelvis" in motion.body_names else motion.body_names[0]
     return motion.body_index(root_body_name)
 
 
@@ -100,6 +131,7 @@ def write_frame(
     joint_indices: np.ndarray,
     root_index: int,
     step: int,
+    object_enabled: bool = False,
 ) -> None:
     """Write one motion frame into SceneData and run forward kinematics."""
     qpos = np.zeros((1, model.num_dof_pos), dtype=np.float32)
@@ -107,12 +139,21 @@ def write_frame(
 
     qpos[0, :3] = motion.body_pos_w[step, root_index]
     qpos[0, 3:7] = motion.body_quat_w[step, root_index]
-    qpos[0, 7:] = motion.joint_pos[step, joint_indices]
+    robot_qpos_end = 7 + len(joint_indices)
+    qpos[0, 7:robot_qpos_end] = motion.joint_pos[step, joint_indices]
 
     qvel[0, :3] = motion.body_lin_vel_w[step, root_index]
     qvel[0, 3:6] = motion.body_ang_vel_w[step, root_index]
-    qvel[0, 6:] = motion.joint_vel[step, joint_indices]
+    robot_qvel_end = 6 + len(joint_indices)
+    qvel[0, 6:robot_qvel_end] = motion.joint_vel[step, joint_indices]
 
+    # Fill both floating bases before submitting: set_dof_pos validates all
+    # quaternions, including the object's, immediately.
+    if object_enabled:
+        qpos[0, -7:-4] = motion.extensions["object_pos_w"][step]
+        qpos[0, -4:] = motion.extensions["object_quat_w"][step]
+        qvel[0, -6:-3] = motion.extensions["object_lin_vel_w"][step]
+        qvel[0, -3:] = motion.extensions["object_ang_vel_w"][step]
     data.set_dof_pos(qpos, model)
     data.set_dof_vel(qvel)
     model.forward_kinematic(data)
@@ -149,10 +190,14 @@ def replay(
     end_step: int | None = None,
     loop: bool = False,
     speed: float = 1.0,
+    show_object: bool = False,
 ) -> None:
     """Replay a motion using only its file and the robot configuration."""
     motion = MotrixMotion(motion_path)
-    model = build_replay_model(robot_cfg)
+    object_enabled = show_object and all(
+        name in motion.extensions for name in ("object_pos_w", "object_quat_w", "object_lin_vel_w", "object_ang_vel_w")
+    )
+    model = build_replay_model(robot_cfg, show_object=object_enabled)
     joint_indices = _model_joint_indices(model, motion)
     root_index = _root_index(motion)
     start, end = _frame_range(motion, start_step, end_step)
@@ -183,7 +228,7 @@ def replay(
         while True:
             for step in steps:
                 t0 = time.monotonic()
-                write_frame(model, data, motion, joint_indices, root_index, step)
+                write_frame(model, data, motion, joint_indices, root_index, step, object_enabled)
                 renderer.sync(data=data)
                 sleep_dt = frame_dt - (time.monotonic() - t0)
                 if sleep_dt > 0:
@@ -206,6 +251,7 @@ def main(argv):
         end_step=_END_STEP.value,
         loop=_LOOP.value,
         speed=_SPEED.value,
+        show_object=_SHOW_OBJECT.value,
     )
 
 

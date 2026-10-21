@@ -46,15 +46,20 @@ def _sample_random_action_np(env: ABEnv) -> np.ndarray:
 def _run_np(env: ArrayEnv):
     renderer = create_renderer(env, RenderConfig())
     env_dt = env.cfg.ctrl_dt
-    while True:
-        t0 = time.monotonic()
-        actions = _sample_random_action_np(env)
-        env.step(actions)
-        renderer.render()
-        real_dt = time.monotonic() - t0
-        sleep_dt = env_dt - real_dt
-        if sleep_dt > 0:
-            time.sleep(sleep_dt)
+    try:
+        while True:
+            t0 = time.monotonic()
+            actions = _sample_random_action_np(env)
+            env.step(actions)
+            renderer.render()
+            real_dt = time.monotonic() - t0
+            sleep_dt = env_dt - real_dt
+            if sleep_dt > 0:
+                time.sleep(sleep_dt)
+    except RenderClosedError:
+        pass
+    finally:
+        renderer.close()
 
 
 def _make_robot_scene(robot_cfg: RobotCfg) -> StandardSceneCfg:

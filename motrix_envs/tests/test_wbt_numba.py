@@ -729,7 +729,7 @@ def test_wbt_build_spec_is_spawn_pickle_safe() -> None:
 
 @pytest.mark.parametrize(
     "env_name",
-    ["dex-evt-wbt-dance", "g1-29dof-wbt-largebox", "g1-wbt-dance", "k1-wbt-freekick"],
+    ["dex-evt-wbt-dance", "g1-29dof-wbt-largebox", "g1-29dof-wbt-largebox-object", "g1-wbt-dance", "k1-wbt-freekick"],
 )
 def test_numba_wbt_manager_builds_for_all_wbt_presets(env_name: str) -> None:
     env = registry.make(env_name, mode="play", num_envs=2)
@@ -754,7 +754,7 @@ def test_numba_wbt_manager_builds_for_all_wbt_presets(env_name: str) -> None:
         "dof_vel",
         "actions",
     ]
-    assert [term.name for term in value_terms] == [
+    shared_value_names = [
         "motion_joint",
         "motion_ref_pos_b",
         "motion_ref_ori_b",
@@ -766,6 +766,9 @@ def test_numba_wbt_manager_builds_for_all_wbt_presets(env_name: str) -> None:
         "dof_vel",
         "actions",
     ]
+    # Object-interaction tasks append privileged state to the shared WBT critic.
+    assert [term.name for term in value_terms[: len(shared_value_names)]] == shared_value_names
+    assert [term.name for term in value_terms] == list(env.cfg.observation_cfgs()["value"])
     observation_space = env.observation_space
     assert observation_space.value is not None
     for terms, width in (
@@ -777,13 +780,7 @@ def test_numba_wbt_manager_builds_for_all_wbt_presets(env_name: str) -> None:
         assert terms[-1].output_slice.stop == width
 
     assert [term.name for term in env.manager_layout.rewards] == [field.name for field in fields(env.cfg.rewards)]
-    assert [term.name for term in env.manager_layout.terminations] == [
-        "bad_ref_z",
-        "bad_ref_ori",
-        "bad_body_z",
-        "bad_dof_pos",
-        "bad_dof_vel",
-    ]
+    assert [term.name for term in env.manager_layout.terminations] == list(env.cfg.termination_cfgs())
 
 
 def test_g1_wbt_dance_mgr_uses_manager_environment() -> None:

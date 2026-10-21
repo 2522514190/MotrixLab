@@ -23,6 +23,7 @@ from motrix_env_core.sim.write import (
     KinematicBodyPositionWrite,
     KinematicBodyRotationWrite,
     LinkComWrite,
+    LinkInertiaWrite,
     LinkMassWrite,
     SimWriteCompiler,
     WriteProgram,
@@ -114,6 +115,10 @@ class _DispatchCompiler(SimWriteCompiler):
         del name, write
         self.dispatched.append("mass")
 
+    def compile_link_inertia(self, name, write) -> None:
+        del name, write
+        self.dispatched.append("inertia")
+
     def compile_link_com(self, name, write) -> None:
         del name, write
         self.dispatched.append("com")
@@ -142,6 +147,7 @@ def test_sim_write_compiler_dispatches_each_write_to_its_typed_compiler() -> Non
     ActuatorKpWrite(("actuator",)).compile_with(compiler, "write")
     ActuatorDampingWrite(("actuator",)).compile_with(compiler, "write")
     LinkMassWrite(("body",)).compile_with(compiler, "write")
+    LinkInertiaWrite(("body",)).compile_with(compiler, "write")
     LinkComWrite(("body",)).compile_with(compiler, "write")
     GeomFrictionWrite(("geom",)).compile_with(compiler, "write")
 
@@ -162,6 +168,7 @@ def test_sim_write_compiler_dispatches_each_write_to_its_typed_compiler() -> Non
         "kp",
         "damping",
         "mass",
+        "inertia",
         "com",
         "friction",
     ]

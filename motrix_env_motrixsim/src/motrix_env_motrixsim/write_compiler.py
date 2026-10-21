@@ -27,6 +27,7 @@ from motrix_env_core.sim.write import (
     KinematicBodyPositionWrite,
     KinematicBodyRotationWrite,
     LinkComWrite,
+    LinkInertiaWrite,
     LinkMassWrite,
     SimWriteCompiler,
     WriteProgram,
@@ -45,8 +46,8 @@ class _CompiledWrite:
 class MotrixSimWriteCompiler(SimWriteCompiler):
     """Compile neutral write declarations against one MotrixSim model and data batch.
 
-    Every write compiles into one native write plan; reset and
-    forward-kinematics behavior are baked into the plan at compile time.
+    Native writes share one plan; inertia uses the link API after the plan
+    because the native write-plan API does not expose inertia overrides.
     """
 
     def __init__(self, model: mtx.SceneModel, data: mtx.SceneData) -> None:
@@ -56,6 +57,7 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
 
     def _begin_compile(self) -> None:
         self._pending = []
+        self._inertia_writes = {}
 
     def _build_program(self, *, reset: bool, forward_kinematics: bool) -> WriteProgram:
         native_fields: dict[str, mtx_write.WriteSource] = {}
@@ -74,7 +76,7 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
             refresh_kinematics |= compiled.refresh_kinematics
         buffers: dict[str, np.ndarray] = {}
         native_program = None
-        if native_fields:
+        if native_fields or (self._inertia_writes and reset):
             # Reset (restore defaults, then apply the writes) and the FK pass
             # are baked into the native plan at compile time.
             refresh = forward_kinematics and (reset or refresh_kinematics)
@@ -83,7 +85,9 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
             )
             for name in native_fields:
                 buffers[name] = native_program[name]
-        return _MotrixSimWriteProgram(self._data, buffers, native_program)
+        for name, links in self._inertia_writes.items():
+            buffers[name] = np.zeros((*self._data.shape, len(links), 6), dtype=np.float32)
+        return _MotrixSimWriteProgram(self._data, buffers, native_program, self._inertia_writes)
 
     def compile_body_joint_position(self, name: str, write: BodyJointPositionWrite) -> None:
         body = _named_body(self._model, write.body)
@@ -246,6 +250,10 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
         self._targets(name, write.links, "link", _named_link)
         self._pending.append((name, _CompiledWrite(native=mtx_write.LinkMassOverride(list(write.links)))))
 
+    def compile_link_inertia(self, name: str, write: LinkInertiaWrite) -> None:
+        self._targets(name, write.links, "link", _named_link)
+        self._inertia_writes[name] = tuple(_named_link(self._model, link) for link in write.links)
+
     def compile_link_com(self, name: str, write: LinkComWrite) -> None:
         self._targets(name, write.links, "link", _named_link)
         self._pending.append((name, _CompiledWrite(native=mtx_write.LinkCenterOfMassOverride(list(write.links)))))
@@ -340,10 +348,12 @@ class _MotrixSimWriteProgram(WriteProgram):
         data: mtx.SceneData,
         buffers: dict[str, np.ndarray],
         native_program: mtx_write.WriteProgram | None = None,
+        inertia_writes: dict | None = None,
     ) -> None:
         self._data = data
         self._buffers = buffers
         self._native_program = native_program
+        self._inertia_writes = inertia_writes or {}
 
     def buffer(self, name: str) -> np.ndarray:
         return self._buffers[name]
@@ -360,6 +370,18 @@ class _MotrixSimWriteProgram(WriteProgram):
                 return
         if self._native_program is not None:
             self._native_program.execute(self._data, env_ids=None if env_ids is None else np.sort(env_ids))
+
+        # The native write-plan API does not yet expose inertia. Apply the
+        # link API after the native reset, preserving every unselected lane.
+        for name, links in self._inertia_writes.items():
+            for index, link in enumerate(links):
+                values = self._buffers[name][:, index, :]
+                if env_ids is None:
+                    link.set_inertia_override(self._data, values)
+                else:
+                    current = np.array(link.get_inertia_override(self._data), copy=True)
+                    current[env_ids] = values[env_ids]
+                    link.set_inertia_override(self._data, current)
 
 
 def _named_body(model: mtx.SceneModel, body_name: str):

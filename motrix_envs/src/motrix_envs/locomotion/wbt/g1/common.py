@@ -10,7 +10,7 @@ from motrix_robots.unitree import UnitreeG129Dof
 
 from motrix_env_core.base import SimCfg
 from motrix_env_core.config import configclass
-from motrix_env_core.config.scene import SystemCameraCfg
+from motrix_env_core.config.scene import BodyCfg, SystemCameraCfg, UrdfFileCfg
 from motrix_env_core.mdp.rewards import ActionRateRewardCfg
 from motrix_env_core.sim import BodyLinkNetContactForceQuery
 from motrix_envs.config.scene import StandardSceneCfg, StandardSceneObjsCfg
@@ -18,7 +18,29 @@ from motrix_envs.locomotion.wbt.cfg import CommandsCfg, RewardsCfg, Terminations
 from motrix_envs.locomotion.wbt.mdp.command import WbtMotionCommandCfg
 from motrix_envs.locomotion.wbt.mdp.terminations import BadBodyZTerminationCfg
 
+
+@configclass
+class G1WbtSceneObjsCfg(StandardSceneObjsCfg):
+    """G1 WBT scene with an optional dynamic large box."""
+
+    box: BodyCfg | None = None
+
+
+def make_large_box() -> BodyCfg:
+    """Create the dynamic Holosoma large-box asset for the G1 scene."""
+    return BodyCfg(
+        model=UrdfFileCfg(file=LARGE_BOX_DIR / "large_box.urdf"),
+        base_link_name="baseLink",
+        # First frame of Holosoma's object-interaction reference clip.  The
+        # mesh is centered near its inertial origin and rests at approximately
+        # z=0.18 m on the ground in this pose.
+        translation=(0.6762383, 0.49337167, 0.18436243),
+        rotation=(0.94689578, 0.31156415, 0.03932899, -0.06906096),
+    )
+
+
 MOTION_DIR = Path(__file__).resolve().parent.parent / "assets" / "motion" / "g1"
+LARGE_BOX_DIR = Path(__file__).resolve().parent.parent / "assets" / "objects" / "largebox"
 G1_TRACKED_BODY_NAMES = (
     "pelvis",
     "left_hip_roll_link",
