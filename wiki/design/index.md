@@ -21,6 +21,8 @@
   在 RL 集成层引入 `rllib/train_backend/algo` 正交维度的架构：配置注册表、`RlFramework`/`AgentProvider`、`TrainerContext` 与通用 runner、算法配置与模型/memory 工厂、run metadata、checkpoint manifest 与 play 自动发现，以及内置 framework 矩阵（skrl / rslrl / motrix）；明确 `motrix_rl` 控制平面与 `motrix_rl.contracts` 契约、三个 provider 插件包的单向依赖和 entry-point discovery 边界。
 - [FastSAC 异构（Collector/Learner 分进程）训练器设计](./fastsac-async-heterogeneous-trainer.md)
   把仿真采样与网络训练拆到两进程、经共享内存交换数据的异构 FastSAC 训练器：统一注册为 `motrix.fastsac`，由 `algo.asynchronous` 选择执行拓扑，并包含 SPSC 有界背压 replay 环、update-to-data 比例治理、seqlock 双缓冲权重/normalizer 快照，以及进程生命周期与 checkpoint 兼容。
+- [训练实时指标（Live Metrics）设计](./live-metrics.md)
+  设置 `MOTRIX_METRICS_URL` 后训练进程把 `motrix.metrics/v1` 记录同时写入 `run_dir/metrics.jsonl` 并批量推送给兼容的 ingest 服务：公开协议（环境变量、记录格式、状态机、幂等、重试规则）、规范 key 与 FastSAC/SKRL/RSLRL 映射、控制平面 `MetricsLogger` 与生命周期接入、失败语义与测试策略。
 - [Framework / Task 配置分离设计](./framework-task-split.md)
   训练入口通过 Hydra task group 直接组合环境、算法与运行配置；外部应用使用自己的 Hydra config root，不维护 Python task registry 或额外 config-root 状态。
 - [ConfigClass 配置装饰器设计](./configclass.md)
@@ -35,6 +37,9 @@
   把 `WbtMotionCommand` 从"单 clip 假设"中解耦：数据平面 `MotionLibrary` 将多个 schema v1 npz 文件按任务序重排、按声明装载 `ext_` 通道并拼接为带逐帧 clip 边界（`frame_clip_end`）的全局帧轴，时间线平面由 `WbtMotionCommand` 原地泛化（hold/wrap 语义不变），课程平面第一版冻结现有 sampling 设定。
 - [用户文档 Envs 栏目设计](./user-docs-envs-part.md)
   在现有双语用户指南的 Tutorials 之后建立独立 `Envs` 一级栏目：明确 Environment、Robot、Training Task 与 Tutorial Workflow 的边界，基于 registry、双语 metadata 和 Hydra Task 配置自动生成 Env ID、description 与支持训练算法的 overview 表格，以 Whole Body Tracking、Humanoid Locomotion、Quadruped Locomotion 等任务主题组织环境，并通过先建导航、再统一页面、最后迁移文件的方式渐进落地。
+
+- [ArrayEnv 终态观测结果契约](./array-env-final-observation.md)
+  NumPy 前端的稀疏终态观测结果、捕获时机、快照所有权与 Manager/FastSAC 边界。
 
 ## 使用说明
 

@@ -156,15 +156,15 @@ An episode terminates when any of the following is true:
 ### 1. Environment Preview
 
 ```bash
-python scripts/view.py env=stewart-static
-python scripts/view.py env=stewart-disturb-xy
+mxlab view env=stewart-static
+mxlab view env=stewart-disturb-xy
 ```
 
 ### 2. Start Training
 
 ```bash
-python scripts/train.py task=stewart-static/skrl.ppo
-python scripts/train.py task=stewart-disturb-xy/skrl.ppo
+mxlab train task=stewart-static/skrl.ppo
+mxlab train task=stewart-disturb-xy/skrl.ppo
 ```
 
 ### Training Notes
@@ -183,8 +183,8 @@ tensorboard --logdir runs/stewart-disturb-xy
 ### 4. Test Training Results
 
 ```bash
-python scripts/play.py env=stewart-static
-python scripts/play.py env=stewart-disturb-xy
+mxlab play env=stewart-static
+mxlab play env=stewart-disturb-xy
 ```
 
 ---

@@ -12,7 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from motrix_deploy.artifact import ControlSpec, DeploymentManifest, inspect_artifact, read_artifact, write_artifact
+from motrix_deploy.artifact import (
+    ControlSpec,
+    DeploymentManifest,
+    inspect_artifact,
+    read_artifact,
+    sha256_bytes,
+    write_artifact,
+)
 from motrix_deploy.contracts import JointControlMode
 from motrix_deploy.errors import ArtifactError, ValidationError
 
@@ -36,6 +43,33 @@ def test_artifact_round_trip_and_inspect(
     assert summary["policy"]["input"] == {"name": "observation", "shape": [1, 4], "dtype": "float32"}
 
 
+def test_task_payload_round_trip_and_tamper_rejection(
+    tmp_path: Path,
+    manifest_factory: Callable[[], DeploymentManifest],
+) -> None:
+    import dataclasses
+
+    from motrix_deploy.artifact.schema import PayloadSpec
+
+    payload = b"motion-clip-npz-bytes"
+    manifest = dataclasses.replace(
+        manifest_factory(),
+        payloads=(PayloadSpec(path="payloads/motion.npz", sha256=sha256_bytes(payload)),),
+    )
+    output = tmp_path / "fixture.deploy"
+    artifact = write_artifact(output, manifest, {"policy/model.onnx": POLICY_BYTES, "payloads/motion.npz": payload})
+    assert (output / "payloads" / "motion.npz").read_bytes() == payload
+    assert artifact.manifest.payloads[0].path == "payloads/motion.npz"
+    # A modified task payload is rejected by its checksum.
+    (output / "payloads" / "motion.npz").write_bytes(b"tampered")
+    with pytest.raises(ArtifactError, match="payload sha256 mismatch"):
+        read_artifact(output)
+    # Missing and unexpected payload keys are rejected at the write boundary.
+    with pytest.raises(ArtifactError, match="payload keys must be exactly"):
+        write_artifact(tmp_path / "short.deploy", manifest, {"policy/model.onnx": POLICY_BYTES})
+
+
+@pytest.mark.integration
 def test_cli_inspect_outputs_json(tmp_path: Path, manifest_factory: Callable[[], DeploymentManifest]) -> None:
     output = tmp_path / "fixture.deploy"
     write_artifact(output, manifest_factory(), {"policy/model.onnx": POLICY_BYTES})
@@ -51,7 +85,7 @@ def test_cli_inspect_outputs_json(tmp_path: Path, manifest_factory: Callable[[],
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(Path(__file__).parent), env.get("PYTHONPATH", "")])
     result = subprocess.run(
-        [sys.executable, "-m", "motrix_deploy.cli", "inspect", f"artifact={output}"],
+        [sys.executable, "-m", "motrixlab.cli", "deploy", "inspect", f"artifact={output}"],
         env=env,
         check=False,
         capture_output=True,

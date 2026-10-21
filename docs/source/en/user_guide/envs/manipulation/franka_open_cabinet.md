@@ -234,13 +234,13 @@ Cabinet is fixed on ground with drawer in closed state (joint position at 0).
 ### Training
 
 ```bash
-python scripts/train.py task=franka-open-cabinet/skrl.ppo
+mxlab train task=franka-open-cabinet/skrl.ppo
 ```
 
 ### Policy Evaluation
 
 ```bash
-python scripts/play.py env=franka-open-cabinet
+mxlab play env=franka-open-cabinet
 ```
 
 ### TensorBoard

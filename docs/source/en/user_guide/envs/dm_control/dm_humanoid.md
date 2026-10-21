@@ -185,17 +185,17 @@ total_reward = posture_reward * speed_reward * energy_reward * gait_reward
 ### 1. Environment Preview
 
 ```bash
-python scripts/view.py env=dm-humanoid-stand
-python scripts/view.py env=dm-humanoid-walk
-python scripts/view.py env=dm-humanoid-run
+mxlab view env=dm-humanoid-stand
+mxlab view env=dm-humanoid-walk
+mxlab view env=dm-humanoid-run
 ```
 
 ### 2. Start Training
 
 ```bash
-python scripts/train.py task=dm-humanoid-stand/skrl.ppo
-python scripts/train.py task=dm-humanoid-walk/skrl.ppo
-python scripts/train.py task=dm-humanoid-run/skrl.ppo
+mxlab train task=dm-humanoid-stand/skrl.ppo
+mxlab train task=dm-humanoid-walk/skrl.ppo
+mxlab train task=dm-humanoid-run/skrl.ppo
 ```
 
 ### 3. View Training Progress
@@ -207,9 +207,9 @@ tensorboard --logdir runs/dm-humanoid-walk
 ### 4. Test Training Results
 
 ```bash
-python scripts/play.py env=dm-humanoid-stand
-python scripts/play.py env=dm-humanoid-walk
-python scripts/play.py env=dm-humanoid-run
+mxlab play env=dm-humanoid-stand
+mxlab play env=dm-humanoid-walk
+mxlab play env=dm-humanoid-run
 ```
 
 ---

@@ -18,20 +18,153 @@ extras. The workspace root requires `motrix-rl-builtin` and `motrix-rl-skrl`, en
 for the built-in demos. The root `skrl-jax` extra adds the JAX backend; `rslrl` adds the optional RSLRL plugin.
 Runtime installation does not force other optional workspace packages.
 
-Environment-specific training presets live under `configs/task/`, while shared provider defaults live under
-`configs/algo_base/`. From the workspace root, select a preset with Hydra's `task=<env-id>/<method>` syntax (run from the
-activated workspace environment, `source .venv/bin/activate`):
+## GPU installation profiles
 
-```bash
-python scripts/train.py task=cartpole/skrl.ppo
-python scripts/train.py task=cartpole/rslrl.ppo
-python scripts/train.py task=g1-walk-rough/motrix.fastsac
+`motrix-rl[cuda]` and `motrix-rl[rocm]` define the tested NVIDIA and AMD Torch dependency profiles. Without either extra,
+Torch uses the default package index; this does not imply a CPU-only build. The workspace forwards its `cuda`/`rocm` extras
+to this package, so `sh install.sh --gpu cuda` and `sh install.sh --gpu rocm` remain unchanged.
+
+For an external **uv project consuming Git sources**, select one profile and pin the source revision:
+
+```toml
+[project]
+dependencies = ["motrix-rl[cuda]"] # or motrix-rl[rocm]
+
+[tool.uv.sources]
+motrix-rl = { git = "https://github.com/Motphys/MotrixLab", rev = "<commit>", subdirectory = "motrix_rl" }
 ```
 
-Install the extra required by the selected provider before training:
+uv reads this source package's extra-gated PyTorch index routing and resolves its internal workspace dependencies
+(`motrix-env-core` and `motrix-deploy`) from the same Git revision. No consumer-side Torch version pins, PyTorch index
+mappings, or sibling-package source mappings are needed.
+
+If the consuming project exposes **both** profiles as optional extras, declare both the forwarding and package-qualified
+conflict pairs at the consuming root. Workspace resolution collects member-local conflicts, but external Git consumers
+need the explicit package-qualified pair for the index-specific source split:
+
+```toml
+[project.optional-dependencies]
+cuda = ["motrix-rl[cuda]"]
+rocm = ["motrix-rl[rocm]"]
+
+[tool.uv]
+conflicts = [
+    [{ extra = "cuda" }, { extra = "rocm" }],
+    [{ package = "motrix-rl", extra = "cuda" }, { package = "motrix-rl", extra = "rocm" }],
+]
+```
+
+Select one with `uv sync --extra cuda` or `uv sync --extra rocm`. CUDA routing applies on Linux/Windows; ROCm routing is
+Linux x86_64 only. On other platforms these profile-specific requirements are inactive and the base Torch dependency
+uses the default index. Universal lockfiles that combine GPU profiles and macOS may also need explicit platform splits,
+as in the workspace root's `tool.uv.environments`.
+
+Use `uv sync` for profile installation. In uv 0.9.8 and 0.9.14, `uv export` does not correctly preserve GPU selection
+through forwarding extras; do not use its exported requirements to install these GPU profiles.
+
+**Wheel/PyPI and pip installations:** extras retain their version requirements, but wheel metadata does not carry
+`tool.uv.sources` or index definitions, and pip does not interpret them even for Git sources. Configure the appropriate
+[PyTorch wheel index](https://pytorch.org/get-started/locally/) in the consuming installer/project explicitly. In particular,
+a `rocm` extra's Torch version alone does not guarantee a ROCm build. GPU selection is explicit, not hardware auto-detection.
+
+## Usage
+
+Install `motrixlab` for the `mxlab train`, `mxlab play`, `mxlab export-onnx`, and `mxlab export-deploy`
+commands, backed by `motrix_rl.commands.train`, `motrix_rl.commands.play`,
+`motrix_rl.commands.export_onnx`, and `motrix_rl.commands.export_deploy`. Their primary Hydra configurations ship in
+`motrix_rl.configs`; the commands do not require a repository checkout or a particular working directory.
+For training and playback, install an environment package and the selected provider too. The application package also provides `mxlab view` for environment and robot visualization; see the [integration package README](../motrixlab/README.md).
+For the built-in environments, activate the installed workspace environment (`source .venv/bin/activate`) and run from
+the workspace root:
+
+```bash
+mxlab train task=cartpole/skrl.ppo
+mxlab train task=cartpole/rslrl.ppo
+mxlab train task=g1-walk-rough/motrix.fastsac
+mxlab play env=cartpole
+mxlab play env=cartpole policy=/path/to/run
+mxlab export-onnx run_dir=/path/to/run output=artifacts/policy.onnx
+mxlab export-deploy run_dir=/path/to/run output=artifacts/policy.deploy
+mxlab export-deploy env=go2-walk-flat output=artifacts/go2-walk-flat.deploy
+```
+
+`mxlab export-onnx` exports a saved run's best policy without selecting a `task` or creating an environment. Install the provider used by
+that run; see the [ONNX export tutorial](../docs/source/en/user_guide/tutorial/advanced/export_onnx.md) for supported
+configurations. `mxlab export-deploy` creates a self-contained deployment artifact; specify exactly one of `run_dir` or
+`env` (the latter selects the latest metadata-backed run). Its numerical checks use `validation.*`, while ONNX export
+uses `parity.*`. The `export_onnx.yaml` and `export_deploy.yaml` configurations ship in `motrix_rl.configs` and follow
+the same project-first discovery described below, falling back to packaged files when the project does not provide them.
+
+Deployment profile compilers come from installed environment plugins, without hardcoded environment imports in the CLI.
+See the [deployment tutorial](../docs/source/en/user_guide/tutorial/advanced/motrix_deploy.md#add-a-deployment-profile-compiler)
+for the plugin contract. `motrix-rl` depends on `motrix-deploy` for artifact creation; `motrix-deploy` does not depend on RL.
+
+`mxlab` is the sole CLI entry point; the component modules retain internal callable command adapters and Python APIs.
+Use `mxlab --version` to query the version. In an already installed uv environment, use
+`uv run --no-sync mxlab train ...` (or `mxlab play` / `mxlab export-onnx` / `mxlab export-deploy`) to avoid re-resolving GPU profiles.
+Run artifacts are written under `runs/` relative to the working directory by default.
+
+Primary train/play configurations and shared provider defaults ship in `motrix_rl.configs`, with sources under
+`motrix_rl/src/motrix_rl/configs/` (`algo_base/` for defaults). Concrete task presets belong to the consuming project:
+the workspace keeps its built-in demos under root `configs/task/`, discovered through the current directory's
+`./configs`, just like an external project. The packaged train configuration uses a `task: null` placeholder so bare
+`--help` works without choosing a default environment. Actual training requires an explicit `task=...` selection;
+mandatory `TrainConfig` fields reject execution without a task. Playback uses saved run configuration and needs no task
+config directory. Environment packages do not own training configuration, and there is no built-in Hydra search-path plugin.
+
+Hydra configuration discovery and runtime environment discovery are separate. Core registry queries automatically load
+installed environment providers from `motrix_env_core.envs`; train/play need no registration-module configuration or
+side-effect imports. Environment packages remain independent of training/Hydra Task configs. See
+[core discovery](../motrix_env_core/README.md#environment-discovery) for callback and dependency-error semantics.
+
+In the workspace, install the extra required by the selected provider before training:
 
 ```bash
 sh install.sh --skrl-jax   # JAX (Linux only)
 sh install.sh --skrl-torch # PyTorch (default)
 sh install.sh --rslrl      # RSLRL (PyTorch only)
 ```
+
+## External project integration
+
+The CLI discovers `./configs` in the current working directory when it exists. It does not search parent directories,
+and a missing default directory is ignored. An explicit `--config-dir <path>` overrides this default directory.
+The selected project directory takes precedence over packaged defaults, including same-name `algo_base` configurations;
+files not provided by the project fall back to the package. Hydra selects the first matching file, rather than merging
+same-name files from multiple directories:
+
+```bash
+mxlab train task=my-task/skrl.ppo
+mxlab train --config-dir /path/to/project/configs task=my-task/skrl.ppo
+```
+
+Install the external environment package; train and play discover its registered environments automatically.
+Playback uses the same discovery: `mxlab play env=my-task`. See
+[Environment registration](../docs/source/en/user_guide/tutorial/building_envs/direct_env.md#environment-registration)
+for packaging an environment.
+
+An installed consuming project can expose packaged training presets through a Hydra `SearchPathPlugin` without coupling configuration
+discovery to environment registration. For example, put the following in `src/hydra_plugins/my_project_searchpath.py`,
+with task YAML files in `src/my_project/configs/task/`:
+
+```python
+from hydra.core.config_search_path import ConfigSearchPath
+from hydra.plugins.search_path_plugin import SearchPathPlugin
+
+
+class MyProjectSearchPathPlugin(SearchPathPlugin):
+    def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:
+        if not any(
+            item.provider == "main" and item.path == "pkg://motrix_rl.configs"
+            for item in search_path.get_path()
+        ):
+            return
+        search_path.append(provider="my_project", path="pkg://my_project.configs")
+```
+
+Make `my_project.configs` an importable package (include `__init__.py`) and include its YAML resources in the wheel.
+Package both `my_project` and `hydra_plugins/my_project_searchpath.py` in the installed distribution. Keep `hydra_plugins`
+a shared namespace package: **do not add `hydra_plugins/__init__.py`**. Hydra discovers installed plugin modules in that
+namespace; no custom entry point or working-directory import convention is needed. Once installed, run
+`mxlab train task=my-task/skrl.ppo` from any directory. Environment callbacks only register environments; they do not
+install Hydra search paths. RL provider plugins still register separately through `motrix_rl.frameworks`.

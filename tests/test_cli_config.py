@@ -4,10 +4,11 @@
 from pathlib import Path
 
 import pytest
-from hydra import compose, initialize_config_dir
+from hydra import compose, initialize_config_module
+from hydra.core.config_store import ConfigStore
 from hydra.core.global_hydra import GlobalHydra
-from motrix_rl_skrl.config import SkrlCfg
 
+from motrix_rl import frameworks
 from motrix_rl.cli import to_typed_config
 from motrix_rl.config import OnnxExportConfig, TrainConfig
 from motrix_rl.plugins import load_plugins
@@ -24,26 +25,25 @@ def _clear_hydra():
 
 def _compose(config_name: str, overrides: list[str]):
     load_plugins()
-    with initialize_config_dir(version_base=None, config_dir=CONFIG_DIR):
+    if config_name == "view":
+        from motrixlab.commands.view import ViewConfig
+
+        ConfigStore.instance().store(name="view_schema", node=ViewConfig)
+    config_module = "motrixlab.configs" if config_name == "view" else "motrix_rl.configs"
+    initializer = initialize_config_module(version_base=None, config_module=config_module)
+    if config_name == "train":
+        overrides = [f"hydra.searchpath=[file://{CONFIG_DIR}]", *overrides]
+    with initializer:
         return compose(config_name=config_name, overrides=overrides)
 
 
-def test_train_defaults():
-    cfg = _compose("train", [])
-    assert cfg.task.env == "cartpole"
-    assert cfg.task.rllib == "skrl"
-    assert cfg.task.algo == "ppo"
-    assert cfg.num_envs == 2048
-    assert cfg.play_num_envs == 16
-    assert cfg.seed == 42
-    assert cfg.logging.backend == "tensorboard"
-    assert cfg.logging.interval == 100
-    assert cfg.checkpoint.interval == 0
+def test_selected_train_config_composes_to_selected_provider_type():
+    cfg = _compose("train", ["task=cartpole/skrl.ppo"])
 
     typed_cfg = to_typed_config(cfg, TrainConfig)
+
     assert isinstance(typed_cfg, TrainConfig)
-    assert typed_cfg.task.env == "cartpole"
-    assert isinstance(typed_cfg.algo, SkrlCfg)
+    assert isinstance(typed_cfg.algo, frameworks.get_config_type(typed_cfg.task.rllib, typed_cfg.task.algo))
 
 
 def test_train_scalar_overrides():
@@ -67,7 +67,7 @@ def test_train_scalar_overrides():
 
 
 def test_train_nested_algo_override():
-    cfg = _compose("train", ["algo.agent.learning_rate=1e-3", "seed=7"])
+    cfg = _compose("train", ["task=cartpole/skrl.ppo", "algo.agent.learning_rate=1e-3", "seed=7"])
     assert cfg.algo.agent.learning_rate == 1e-3
     assert cfg.seed == 7
 

@@ -28,8 +28,11 @@ import torch.multiprocessing as mp
 
 from motrix_env_core import registry as env_registry
 from motrix_env_core.renderer import RenderConfig
+from motrix_rl import checkpoints
 from motrix_rl.console import TrainingPanelStats, emit_training_panel, open_training_live
 from motrix_rl.contracts import TrainerBase, TrainerContext
+from motrix_rl.device import resolve_default_device
+from motrix_rl.numa import spawn_placement
 from motrix_rl.runs import annotate_run
 from motrix_rl.system_metrics import (
     CpuLoadSampler,
@@ -39,13 +42,18 @@ from motrix_rl.system_metrics import (
     capture_system_info,
     sample_gpu_devices,
 )
+from motrix_rl.training_logger import TrainingLogger
 from motrix_rl_builtin.fastsac.agent import FastSacAgent
-from motrix_rl_builtin.fastsac.async_impl.numa import spawn_placement
 from motrix_rl_builtin.fastsac.async_impl.panels import BootPanel
 from motrix_rl_builtin.fastsac.async_impl.stats import aggregate_collector_stats, nest_timing_path, timing_mean
 from motrix_rl_builtin.fastsac.async_impl.topology import resolve_trainer_topology
-from motrix_rl_builtin.fastsac.async_impl.transport import Control, RingCursors, SharedTransitionRing
+from motrix_rl_builtin.fastsac.async_impl.transport import (
+    Control,
+    RingCursors,
+    SharedTransitionRing,
+)
 from motrix_rl_builtin.fastsac.async_impl.transport.handshake import StartupHandshake
+from motrix_rl_builtin.fastsac.async_impl.transport.ring import FinalObsStorage
 from motrix_rl_builtin.fastsac.async_impl.transport.weight_channel import WeightChannelShared
 from motrix_rl_builtin.fastsac.async_impl.worker import (
     actor_param_numel,
@@ -55,6 +63,7 @@ from motrix_rl_builtin.fastsac.async_impl.worker import (
     run_learner_process,
 )
 from motrix_rl_builtin.fastsac.config import FastSacCfg
+from motrix_rl_builtin.fastsac.live_metrics import ROLLOUT_MEANS, system_scalars
 from motrix_rl_builtin.fastsac.wrap import FastSacEnvWrap
 
 torch.set_float32_matmul_precision("high")
@@ -75,7 +84,7 @@ class Trainer(TrainerBase):
     def _device(self) -> torch.device:
         if self._rlcfg.device:
             return torch.device(self._rlcfg.device)
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return resolve_default_device()
 
     def _make_env(
         self,
@@ -134,6 +143,8 @@ class Trainer(TrainerBase):
         async_options = cfg.trainer.async_options
         logging_interval = self._context.logging.interval
         save_interval = self._context.checkpoint.interval
+        # Parent-only: the live logger holds a thread and locks and never reaches the workers.
+        training_log = TrainingLogger(self._context.run_dir, self._context.metrics)
         train_started_at = time.perf_counter()
 
         if self._context.logging.backend != "tensorboard":
@@ -143,6 +154,7 @@ class Trainer(TrainerBase):
         # child rebuilds its own env because env objects are not picklable across spawn.
         probe = self._make_env(1, render=None, device=torch.device("cpu"))
         obs_dim, critic_obs_dim, act_dim, action_scale, action_bias = self._dims(probe)
+        max_episode_steps = probe.max_episode_steps
         probe.close()
         dims = (obs_dim, critic_obs_dim, act_dim)
 
@@ -164,6 +176,12 @@ class Trainer(TrainerBase):
         # Falls back to the OS default placement on single-node hosts.
         cpus_per_collector = async_options.cpus_per_collector
         num_envs = self._context.num_envs
+        # Env-step accounting follows the collector side: each collector
+        # step ingests one batch of its own env shard, so the aggregate
+        # counter times the shard size is the true transition count (the
+        # learner's global_step is an iteration counter that can drift
+        # from collection under non-strict UTD).
+        per_collector_envs = num_envs // num_collectors
         # Shared-memory primitives allocated in the parent, inherited by children.
         # One SPSC ring + one weight channel per collector: every shared quantity
         # keeps exactly one producer and one consumer, so the lock-free
@@ -205,11 +223,24 @@ class Trainer(TrainerBase):
         # actually uses (topology is the single source of truth), not the
         # host inventory.
         annotate_run(self._context.run_dir, system=capture_system_info(topology=topology))
+        final_obs_enabled = max_episode_steps is not None
+        final_stores: list[FinalObsStorage] | None = (
+            [FinalObsStorage(async_options.ring_capacity, shard, obs_dim, critic_obs_dim) for shard in env_shards]
+            if final_obs_enabled
+            else None
+        )
         rings: list[SharedTransitionRing | RingCursors] = [
             RingCursors()
             if ipc
-            else SharedTransitionRing(async_options.ring_capacity, shard, obs_dim, critic_obs_dim, act_dim)
-            for ipc, shard in zip(ring_ipc, env_shards)
+            else SharedTransitionRing(
+                async_options.ring_capacity,
+                shard,
+                obs_dim,
+                critic_obs_dim,
+                act_dim,
+                final_obs_store=final_stores[i] if final_stores is not None else None,
+            )
+            for i, (ipc, shard) in enumerate(zip(ring_ipc, env_shards))
         ]
         weights = [WeightChannelShared(obs_dim=obs_dim) for _ in range(num_collectors)]
         control = Control(num_collectors)
@@ -224,6 +255,7 @@ class Trainer(TrainerBase):
             is_resume = resume_step > 0
             control.resume_collector_steps(resume_step)
             control.global_step = resume_step
+            training_log.event("resumed", step=resume_step, path=str(self._resume_from), global_step=resume_step)
 
         ctx = mp.get_context("spawn")
         stats_queues = [ctx.Queue(maxsize=8) for _ in range(num_collectors)]
@@ -320,12 +352,18 @@ class Trainer(TrainerBase):
                     "num_learners": num_learners,
                     "rendezvous_file": rendezvous_file,
                     "learner_device": str(topology.learners[rank].device),
+                    "notify_checkpoints": training_log.live.enabled,
                     "all_rings": rings,
                     "weight_ipc": [
                         c.weight_ipc for c in topology.collectors[rank * per_learner : (rank + 1) * per_learner]
                     ],
                     "learner_cpus": topology.learners[rank].cpus if learner_numa_nodes else None,
                     "learner_numa_node": learner_numa_nodes[rank] if learner_numa_nodes else None,
+                    "final_stores": (
+                        final_stores[rank * per_learner : (rank + 1) * per_learner]
+                        if final_stores is not None
+                        else None
+                    ),
                 },
                 name="fastsac-async-learner" if num_learners == 1 else f"fastsac-async-learner-{rank}",
             )
@@ -356,11 +394,17 @@ class Trainer(TrainerBase):
                     "collector_device": str(topology.collectors[i].device),
                     "run_dir": str(self._context.run_dir),
                     "handshake": handshake,
+                    "final_store": final_stores[i] if final_stores is not None else None,
                 },
                 name=f"fastsac-async-collector-{i}",
             )
             for i in range(num_collectors)
         ]
+        # Process name -> the role a worker reports its traceback under (see worker.py).
+        error_roles = {
+            p.name: ("learner" if num_learners == 1 else f"learner[{rank}]") for rank, p in enumerate(p_learners)
+        }
+        error_roles.update({p.name: f"collector[{i}]" for i, p in enumerate(p_collectors)})
 
         # Start each child while the parent is pre-placed on the child's NUMA
         # node: spawn children re-import torch/simulator before their entry
@@ -420,15 +464,26 @@ class Trainer(TrainerBase):
             try:
                 while True:
                     payload = panel_queue.get_nowait()
-                    learner_payloads[payload["rank"]] = payload
+                    notice = payload.get("checkpoint_saved")
+                    if notice is not None:
+                        # Reported at the learner's own step as soon as it arrives.
+                        training_log.event("checkpoint_saved", step=notice["step"], path=notice["path"])
+                    else:
+                        learner_payloads[payload["rank"]] = payload
             except Empty:
                 pass
 
         def _panel_data_ready() -> bool:
-            """The training panel's quiescence gate (see _render_panel)."""
+            """Wait for all learners' first updates, including lazy compilation."""
             return (
                 all(v is not None for v in per_collector_stats.values())
-                and any(v is not None for v in learner_payloads.values())
+                # Initial payloads do not mean lazy compilation/first updates
+                # completed. Short runs may legitimately finish in replay warmup.
+                and all(
+                    v is not None
+                    and (v["training_started"] or control.collector_steps >= num_iterations * num_collectors)
+                    for v in learner_payloads.values()
+                )
                 and control.collector_steps > 0
             )
 
@@ -438,7 +493,8 @@ class Trainer(TrainerBase):
                 f"c{i} {'✓' if per_collector_stats[i] is not None else '…'}" for i in range(num_collectors)
             )
             payload_marks = " ".join(
-                f"l{r} {'✓' if learner_payloads[r] is not None else '…'}" for r in range(num_learners)
+                f"l{r} " + ("✓" if p is not None and p["training_started"] else "initializing first update…")
+                for r, p in learner_payloads.items()
             )
             return f"panel data — stats: {stats_marks} | payloads: {payload_marks} | steps: {control.collector_steps}"
 
@@ -498,6 +554,10 @@ class Trainer(TrainerBase):
                 if abort_reason is None:
                     while not _panel_data_ready():
                         _drain_worker_stats()
+                        # A run shorter than replay warmup may end without an
+                        # update payload; let normal shutdown collect its result.
+                        if all(not p.is_alive() for p in p_learners):
+                            break
                         try:
                             process_name, traceback_text = error_queue.get_nowait()
                         except Empty:
@@ -514,6 +574,7 @@ class Trainer(TrainerBase):
                 print(f"[motrix.fastsac async] {abort_reason}; aborting.")
                 raise RuntimeError(abort_reason)
             print(f"[motrix.fastsac async] all {len(expected)} workers ready — training starts")
+            training_log.event("run_started", step=resume_step, workers=len(expected))
         finally:
             handshake.release()  # idempotent; frees workers on an aborted boot
         # -------------------------------------------------- parent-owned panel
@@ -523,12 +584,6 @@ class Trainer(TrainerBase):
         # workers stay peers with no "primary renderer" role.
         console, live = None, None  # opened lazily once real data flows (see below)
         panel_open_attempted = False
-        try:
-            from torch.utils.tensorboard import SummaryWriter
-
-            tb_writer = SummaryWriter(log_dir=str(self._context.run_dir))
-        except Exception:
-            tb_writer = None
         panel_cpu_sampler = CpuLoadSampler()
         panel_gpu_sampler = GpuUtilizationSampler()
         panel_memory_sampler = MemoryUsageSampler()
@@ -547,12 +602,14 @@ class Trainer(TrainerBase):
         panel_next_log = (
             ((resume_step // max(logging_interval, 1)) + 1) * logging_interval if logging_interval > 0 else 0
         )
+        # warmup_done edge, detected on the panel's own state.
+        panel_was_warming = resume_step < cfg.agent.learning_starts
 
         def _render_panel(force: bool = False) -> None:
             nonlocal panel_anchored, panel_start_time, panel_last_render, console, live, panel_open_attempted
             nonlocal panel_rate_samples
             nonlocal panel_last_log_time, panel_last_log_step, panel_last_updates, panel_next_log
-            nonlocal panel_last_weight_version
+            nonlocal panel_last_weight_version, panel_was_warming
             # ALWAYS drain first: the quiescence gate below waits for learner
             # payloads that can only arrive through this drain — draining
             # after the gate would deadlock the workers on a full queue.
@@ -574,7 +631,8 @@ class Trainer(TrainerBase):
             if not force and time.time() - panel_last_render < 1.0:
                 return
             panel_last_render = time.time()
-            step = control.collector_steps // num_collectors
+            collector_steps = control.collector_steps
+            step = collector_steps // num_collectors
             if step > resume_step and not panel_anchored:
                 panel_start_time = time.time()
                 panel_last_log_time = panel_start_time
@@ -596,15 +654,12 @@ class Trainer(TrainerBase):
                 panel_rate_samples.pop(0)
             t0, s0 = panel_rate_samples[0]
             t1, s1 = panel_rate_samples[-1]
-            # Short-window init: as soon as steps flow, compute over the
-            # available span (floor 1s against div-by-tiny) so the panel
-            # shows a real — if rough — rate immediately; None (warming up)
-            # only means "no steps flowed in the window" (pre-start or a
-            # genuine throughput stall).
-            if s1 > s0:
-                span = max(t1 - t0, 1.0)
-                sps = (s1 - s0) * num_envs / span
-                iters = (s1 - s0) / span
+            # An empty initial window has no rate yet. Once a time span
+            # exists, zero progress is a measured zero, not replay warmup.
+            span = t1 - t0
+            if span > 0:
+                sps = (s1 - s0) * num_envs / max(span, 1.0)
+                iters = (s1 - s0) / max(span, 1.0)
             else:
                 sps = None
                 iters = None
@@ -654,49 +709,57 @@ class Trainer(TrainerBase):
                 checkpoint_path=primary["checkpoint_path"] if primary else None,
             )
             emit_training_panel(live, stats, title=f"{self._env_name}/motrix.fastsac")
-            if tb_writer is not None and step >= panel_next_log:
-                tb_writer.add_scalar("rollout/mean_return", last_stats["return"], step)
-                tb_writer.add_scalar("rollout/mean_ep_len", last_stats["ep_len"], step)
+            if panel_was_warming and not warming:
+                training_log.event("warmup_done", step=step)
+            panel_was_warming = warming
+            if step >= panel_next_log:
+                scalars = {
+                    "rollout/mean_return": last_stats["return"],
+                    "rollout/mean_ep_len": last_stats["ep_len"],
+                }
                 if sps is not None:
-                    tb_writer.add_scalar("perf/env_steps_per_s", sps, step)
-                tb_writer.add_scalar(
-                    "perf/updates_per_s", (updates - panel_last_updates) / max(now - panel_last_log_time, 1e-6), step
-                )
-                tb_writer.add_scalar("async/policy_lag", last_stats["policy_lag"], step)
+                    scalars["perf/env_steps_per_s"] = sps
+                scalars["perf/updates_per_s"] = (updates - panel_last_updates) / max(now - panel_last_log_time, 1e-6)
+                scalars["async/policy_lag"] = last_stats["policy_lag"]
                 if primary and primary.get("weight_version") is not None:
-                    tb_writer.add_scalar(
-                        "async/weight_publishes_per_iter",
-                        (primary["weight_version"] - panel_last_weight_version) / max(step - panel_last_log_step, 1),
-                        step,
-                    )
+                    scalars["async/weight_publishes_per_iter"] = (
+                        primary["weight_version"] - panel_last_weight_version
+                    ) / max(step - panel_last_log_step, 1)
                     panel_last_weight_version = primary["weight_version"]
                 if primary:
                     fills = primary.get("ring_fill") or []
-                    tb_writer.add_scalar("async/ring_fill", sum(f for f in fills if f is not None), step)
+                    scalars["async/ring_fill"] = sum(f for f in fills if f is not None)
                     if primary.get("weight_version") is not None:
-                        tb_writer.add_scalar("async/weight_version", primary["weight_version"], step)
-                tb_writer.add_scalar("async/utd", utd, step)
+                        scalars["async/weight_version"] = primary["weight_version"]
+                scalars["async/utd"] = utd
                 if num_collectors > 1:
                     for i in range(num_collectors):
                         stats_i = per_collector_stats.get(i)
                         if stats_i:
-                            tb_writer.add_scalar(f"async/policy_lag_collector{i}", stats_i["policy_lag"], step)
+                            scalars[f"async/policy_lag_collector{i}"] = stats_i["policy_lag"]
                         if primary:
                             fill = (primary.get("ring_fill") or [None] * num_collectors)[i]
                             if fill is not None:
-                                tb_writer.add_scalar(f"async/ring_fill_collector{i}", fill, step)
-                tb_writer.add_scalar("perf/collect_ms_per_batch", collector_timing_ms.get("collect", 0.0), step)
+                                scalars[f"async/ring_fill_collector{i}"] = fill
+                scalars["perf/collect_ms_per_batch"] = collector_timing_ms.get("collect", 0.0)
                 for k, v in collector_timing_detail_ms.items():
-                    tb_writer.add_scalar(f"perf/collector_{k}_ms", v, step)
-                tb_writer.add_scalar("perf/learn_ms_total", learn_ms, step)
-                tb_writer.add_scalar("perf/learn_pct", learn_pct, step)
+                    scalars[f"perf/collector_{k}_ms"] = v
+                scalars["perf/learn_ms_total"] = learn_ms
+                scalars["perf/learn_pct"] = learn_pct
                 for k, v in last_stats["env_metrics"].items():
-                    tb_writer.add_scalar(f"metrics/{k}", v, step)
+                    scalars[f"metrics/{k}"] = v
                 for k, v in last_stats["reward_terms"].items():
-                    tb_writer.add_scalar(f"reward/{k}", v, step)
+                    scalars[f"reward/{k}"] = v
                 if primary and primary["metrics"] is not None:
                     for k, v in primary["metrics"].items():
-                        tb_writer.add_scalar(f"train/{k}", v, step)
+                        scalars[f"train/{k}"] = v
+                training_log.scalars(
+                    scalars,
+                    step,
+                    env_steps=collector_steps * per_collector_envs,
+                    live_extra=lambda: system_scalars(stats),
+                    placeholders=() if last_stats["episodes"] else ROLLOUT_MEANS,
+                )
                 panel_last_log_time, panel_last_log_step, panel_last_updates = now, step, updates
                 panel_next_log += logging_interval
 
@@ -709,6 +772,16 @@ class Trainer(TrainerBase):
                     for p in crashed:
                         print(f"[motrix.fastsac async] {p.name} crashed (exit {p.exitcode}); stopping.")
                     _drain_child_errors()
+                    crash_step = control.collector_steps // num_collectors
+                    for p in crashed:
+                        error_log = Path("async_errors") / f"{error_roles[p.name]}_error.log"
+                        training_log.event(
+                            "worker_crashed",
+                            step=crash_step,
+                            worker=p.name,
+                            exitcode=p.exitcode,
+                            error_log=error_log.as_posix() if (self._context.run_dir / error_log).exists() else None,
+                        )
                     break
                 if learners_done:
                     _drain_child_errors()
@@ -756,12 +829,6 @@ class Trainer(TrainerBase):
                 except Exception:
                     pass
             wall_time_s = time.perf_counter() - train_started_at
-            # Env-step accounting follows the collector side: each collector
-            # step ingests one batch of its own env shard, so the aggregate
-            # counter times the shard size is the true transition count (the
-            # learner's global_step is an iteration counter that can drift
-            # from collection under non-strict UTD).
-            per_collector_envs = num_envs // num_collectors
             total_env_steps = control.collector_steps * per_collector_envs
             annotate_run(
                 self._context.run_dir,
@@ -773,11 +840,7 @@ class Trainer(TrainerBase):
                     "mean_env_steps_per_s": int(total_env_steps / max(wall_time_s, 1e-9)),
                 },
             )
-            if tb_writer is not None:
-                try:
-                    tb_writer.close()
-                except Exception:
-                    pass
+            training_log.close()
             try:
                 panel_queue.close()
             except Exception:
@@ -803,6 +866,10 @@ class Trainer(TrainerBase):
         for i, p in enumerate(p_collectors):
             if p.exitcode not in (0, None):
                 raise RuntimeError(f"motrix.fastsac async collector {i} process failed with exit code {p.exitcode}")
+        # The primary learner wrote the final checkpoint before exiting cleanly.
+        final_path = checkpoints.final_checkpoint_path(self._context.checkpoint_format, self._context.run_dir)
+        if final_path.exists():
+            training_log.event("checkpoint_saved", step=control.collector_steps // num_collectors, path=str(final_path))
 
     # ------------------------------------------------------------------ play
     def play(self, policy: str) -> None:
@@ -824,7 +891,7 @@ class Trainer(TrainerBase):
         try:
             while True:
                 actions = agent.act(obs, deterministic=True)
-                obs, _, _, _, _ = env.step(actions)
+                obs = env.step(actions).obs
                 if env.render() is False:
                     break
         finally:

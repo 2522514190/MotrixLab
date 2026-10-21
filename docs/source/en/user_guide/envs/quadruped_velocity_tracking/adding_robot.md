@@ -68,7 +68,7 @@ rejected. Every actuator must target a joint and expose a valid control range.
 After registering the robot config, preview it independently:
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
+mxlab view robot=<robot-config-id>
 ```
 
 ## 2. Provide task sensors
@@ -168,7 +168,8 @@ registry.env("<robot>-walk-flat")(QuadrupedWalkTask)
 registry.env("<robot>-walk-rough")(QuadrupedWalkTask)
 ```
 
-Import the module from `motrix_envs/locomotion/quadruped/__init__.py`, so `import motrix_envs` performs registration.
+Import the module from `motrix_envs/locomotion/quadruped/__init__.py` so the built-in registration callback includes it.
+For a standalone package, follow [Environment registration](../../tutorial/building_envs/direct_env.md#environment-registration).
 Each `registry.env(...)` ID must exactly match its `@registry.envcfg(...)` ID. Register only the flat ID when no rough
 config is provided.
 
@@ -196,10 +197,10 @@ inherit the same robot's flat-ground recipe and override only `task.env`.
 Use this progression:
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
-python scripts/view.py env=<robot>-walk-flat
-python scripts/view.py env=<robot>-walk-rough
-python scripts/train.py task=<robot>-walk-flat/rslrl.ppo
+mxlab view robot=<robot-config-id>
+mxlab view env=<robot>-walk-flat
+mxlab view env=<robot>-walk-rough
+mxlab train task=<robot>-walk-flat/rslrl.ppo
 ```
 
 During preview, inspect the default pose, action direction, all four foot contacts, foot-position reference frames, and

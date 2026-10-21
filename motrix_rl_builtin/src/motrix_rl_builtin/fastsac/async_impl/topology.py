@@ -23,7 +23,7 @@ non-NUMA kernels/containers and CPU learners — the OS default placement is
 already optimal there.
 
 The binding itself (affinity + libnuma memory policy, spawn-time
-pre-placement) lives in :mod:`motrix_rl_builtin.fastsac.async_impl.numa`, the ring
+pre-placement) lives in :mod:`motrix_rl.numa`, the ring
 runtime objects in :mod:`motrix_rl_builtin.fastsac.async_impl.transport`; this module
 only computes the decisions.
 """
@@ -36,8 +36,11 @@ from dataclasses import dataclass
 
 import torch
 
+from motrix_rl import numa as system_numa
 from motrix_rl_builtin.fastsac.async_impl import numa
 from motrix_rl_builtin.fastsac.config import FastSacAsyncOptionsCfg
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -120,7 +123,7 @@ def _learner_node(device: torch.device, multi_node: bool) -> int | None:
     if device.type != "cuda":
         return None
     index = device.index if device.index is not None else 0
-    return numa.gpu_numa_node(index)
+    return system_numa.gpu_numa_node(index, runtime="hip" if torch.version.hip else "cuda")
 
 
 def resolve_collector_inference_devices(
@@ -148,8 +151,20 @@ def resolve_collector_inference_devices(
     :func:`motrix_rl_builtin.fastsac.async_impl.collector.resolve_collector_inference_device`.
     """
     device = torch.device(collector_inference_device)
-    if device.type not in ("cpu", "cuda"):
-        raise ValueError(f"collector_inference_device must be cpu or cuda, got '{collector_inference_device}'")
+    if device.type not in ("cpu", "cuda", "mps"):
+        raise ValueError(f"collector_inference_device must be cpu, cuda or mps, got '{collector_inference_device}'")
+    if device.type == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError(
+            f"collector_inference_device='{collector_inference_device}' requested MPS, but MPS is unavailable"
+        )
+    if device.type == "cuda" and device.index is None and not torch.cuda.is_available() and not learner_devices:
+        # Generic "cuda" means "the trainer's accelerator": on a CUDA-less
+        # host it degrades to the default device (MPS on Apple Silicon, CPU
+        # elsewhere), mirroring the learner's device resolution. With an
+        # explicit learner layout this stays pure device arithmetic
+        # (availability validation is worker-side), so co-location proceeds.
+        logger.warning("collector_inference_device='cuda' but CUDA is unavailable; using %s", default_device)
+        return [default_device] * num_collectors
     if (
         device.type == "cuda"
         and device.index is not None
@@ -295,7 +310,7 @@ def resolve_trainer_topology(
     )
 
     env_shards = split_num_envs(num_envs, num_collectors)
-    multi_node = len(numa.available_numa_nodes()) >= 2
+    multi_node = len(system_numa.available_numa_nodes()) >= 2
     per_learner = num_collectors // num_learners
 
     # Per-worker CPU bindings, decided here so workers only apply them. Base
@@ -305,9 +320,12 @@ def resolve_trainer_topology(
     # best-effort contract.
     def _base_cpus(node: int | None) -> list[int]:
         if node is None:
+            # macOS has no sched_getaffinity; degrade to no binding like worker.py
+            if not hasattr(os, "sched_getaffinity"):
+                return []
             return sorted(os.sched_getaffinity(0))
         try:
-            return numa.numa_node_cpus(node)
+            return system_numa.numa_node_cpus(node)
         except ValueError:
             return []
 

@@ -92,9 +92,9 @@ motrix_rl/src/motrix_rl/fastsac/
 **任务配置**：每个环境只保留一个 `configs/task/<env>/motrix.fastsac.yaml`。Task 固定记录 `rllib: motrix`、`algo: fastsac`；`algo.asynchronous` 默认为 `true`，需要同步 baseline 时覆盖为 `false`。
 
 ```bash
-uv run scripts/train.py task=g1-walk-flat/motrix.fastsac                         # 异构（默认）
-uv run scripts/train.py task=g1-walk-flat/motrix.fastsac algo.asynchronous=false # 同步 baseline
-# 二者产出的 checkpoint 均为 .pt，同一 scripts/play.py 可回放
+mxlab train task=g1-walk-flat/motrix.fastsac                         # 异构（默认）
+mxlab train task=g1-walk-flat/motrix.fastsac algo.asynchronous=false # 同步 baseline
+# 二者产出的 checkpoint 均为 .pt，同一 mxlab play 可回放
 ```
 
 ---
@@ -139,6 +139,17 @@ host 环下 learner 的 drain 承担全部搬运：ring→pinned 的 CPU memcpy 
 
 
 **语义一致性**：collector 只是把同步版 collect 相位原样搬到另一进程，transition 的构造代码相同——调用顺序、dtype（dones/truncations 用 long）、auto-reset 后的 next_obs 语义与同步版逐字节一致。这是「算法未变、只变执行拓扑」的基础。
+
+#### 终态观测 payload
+
+Async Env 声明 episode horizon 时，trainer 为所有 collector 创建各自的稀疏行区并启用 ring payload。每个 learner 收到本 rank 的 `final_stores` 列表，从其是否为 None 推导 agent 的 `final_obs_bootstrap`，让 replay 在构造时建立终态行表（bool 本身不参与容量推导）。所有 collector 的终态支持统一启用或禁用。Env 快照契约见 [ArrayEnv 终态观测](./array-env-final-observation.md)。普通 next observation 由 successor slot 推导，截断 transition 使用紧凑的 `FinalObsPayload(env_ids, obs, critic_obs)` 覆盖 bootstrap 观测。
+
+- `FinalObsStorage` 是每条 ring 独立的稀疏共享行区（3*num_envs 行，num_envs 为该 collector 的分片大小），slot 记录起点、行数及绝对行尾。主字段与 payload 完整写入后一起发布，消费确认后一起回收；CUDA IPC 的确认由完成事件控制。容量只影响背压，不依赖截断间隔。
+- Collector 在采样动作和推进 Env 前检查主 ring 空 slot 与至少 num_envs 个空闲终态行，按本步最坏情况保守检查；consumer 只释放容量，SPSC 下本步不会再因容量失败。两种容量背压均计入 collector 的 wait timing。
+- Learner 在释放 slot 前复制终态行，并通过 replay 的 `extend_batch(..., final_payloads=...)` 一起 ingest，warmup 和不训练的循环也执行。多 collector 按普通 transition 的 generation 顺序合并 payload，env_ids 加上本 rank 内前序 collector 的累计环境数偏移；无终态行的 generation 使用 None。未完成 generation 的 slot 与行保持未确认，快慢 collector 不会引起错配。设备采样等待全部 ingest 写入。
+- Replay 以存活 transition 引用管理空闲行，覆盖 slot 时回收；行表按需几何增长，最多 n_env*(buffer_size+1) 行，不缩短 replay 窗口或覆盖有效引用。sample 在 compiled 网络更新之外执行；罕见 CUDA 表增长先同步 outstanding work。
+
+内存预算：终态观测额外 backing 为 live_rows*(obs_dim+critic_obs_dim)*4 bytes。连续每步截断会达到 dense 最坏规模；正常稀疏场景只分配所需行。同步训练路径与 Torch 前端的终态快照尚未接入。
 
 ### 4.2 WeightSnapshot — seqlock 双缓冲（learner → collector）
 
@@ -219,7 +230,7 @@ TensorBoard scalar 与同步版同名（`rollout/mean_return`、`rollout/mean_ep
 
 ### 6.3 checkpoint 兼容
 
-learner 持有完整 `FastSacAgent`，直接复用其 `state_dict()` 与通用 checkpoint 记录逻辑。产出的 `.pt` 与同步版**结构相同**，因此：同一 `scripts/play.py` 可回放异构版 checkpoint；异构版可 resume 同步版 checkpoint，反之亦然，支持「同步预训练 + 异构继续」这类混合实验。
+learner 持有完整 `FastSacAgent`，直接复用其 `state_dict()` 与通用 checkpoint 记录逻辑。产出的 `.pt` 与同步版**结构相同**，因此：同一 `mxlab play` 可回放异构版 checkpoint；异构版可 resume 同步版 checkpoint，反之亦然，支持「同步预训练 + 异构继续」这类混合实验。
 
 ### 6.4 关闭与容错
 
@@ -286,11 +297,12 @@ class FastSacCfg:
 - **进度与日志**：`Control.collector_steps` 是 per-collector 计数器数组（单写方不变），聚合求和后除以 collector 数得到「完整 num_envs 批等价步」，作为训练进度 / 日志 / checkpoint / resume 的统一基准——任意 collector 数下 `num_learning_iterations`、`learning_starts`、TensorBoard x 轴与同步版语义一致；每 collector 有独立 `StatsQueue`（快照携带 `collector_id`）、每个 learner rank 每 log 窗口发一份轻量 payload，全部汇到**父进程**——worker 完全对等，父进程聚合（return/ep_len/timing 取均值、episodes 求和、policy_lag 取 max）后渲染面板并写 TensorBoard。面板/系统采样由未绑定的父进程执行，CPU 视图是全机（所有 core）而非某个 node；多 collector 时额外输出 `async/policy_lag_collector{i}`、`async/ring_fill_collector{i}`，单 collector 的标量键保持不变。
 - **resume 语义**：多 collector 下 resume 与单 collector 相同——learner 从 checkpoint 恢复网络与优化器，所有 collector 重新 reset env 后从 checkpointed iteration 继续采样；ring / 在途 transition 不跨进程恢复。
 
-**NUMA 绑定**（拓扑决策在 `async_impl/topology.py`，绑定原语在 `async_impl/numa.py`，等价 `numactl --cpunodebind= --membind=`，best-effort，**自动分配**）：
+**NUMA 绑定**（FastSAC 拓扑决策在 `async_impl/topology.py`，collector CPU 分片策略在 `async_impl/numa.py`；通用节点发现、GPU locality 查询、spawn 预绑定与绑定原语统一在 `motrix_rl.numa`，等价 `numactl --cpunodebind= --membind=`，best-effort，**自动分配**）：
 
-- **分配策略**（`resolve_worker_topology`）：learner 绑到其 GPU 的 PCIe 本地 node（经 NVML/pynvml 查 PCI bus id + sysfs `numa_node`，与 system_metrics 同款进程内会话，不创建 CUDA context）；每个 collector 跟随其归属 learner 的 node——collector/learner 对绝不跨 NUMA 边界，transition ring、pinned staging 与权重快照全部 node 本地。单 node 宿主机 / CPU learner / GPU 拓扑未知时不绑定（OS 默认放置）。实测依据：双路双卡机器上整树 node 绑定较不绑 +58%（first-touch 内存页跨 node 是主要开销），collector 与 learner 同 node 的局部性收益远大于带宽减半的损失。
+- **GPU 查询分派**：调用方按训练 runtime 显式传入 `cuda` 或 `hip`，不根据管理库是否可用猜测硬件。CUDA 经 NVML/pynvml 查 PCI bus id，再读 sysfs `numa_node`，必要时以 `nvidia-smi topo -m` 的 CPU affinity 兜底；HIP 在独立子进程加载 Torch/HIP runtime，按继承的可见性映射查询逻辑设备 PCI 地址，再读同一 sysfs 属性，不在父进程初始化 HIP，也不回退到 NVIDIA 的物理设备序号。查询失败返回未知。CUDA 路径沿用 NVML 物理设备编号，尚不解析 `CUDA_VISIBLE_DEVICES` 重映射；AMD SMI 的物理设备枚举也不能直接视为 HIP 可见逻辑序号。
+- **分配策略**（`resolve_worker_topology`）：learner 绑到其 GPU 的 PCIe 本地 node（由上述通用 GPU locality 查询提供）；每个 collector 跟随其归属 learner 的 node——collector/learner 对绝不跨 NUMA 边界，transition ring、pinned staging 与权重快照全部 node 本地。单 node 宿主机 / CPU learner / GPU 拓扑未知时不绑定（OS 默认放置）。实测依据：双路双卡机器上整树 node 绑定较不绑 +58%（first-touch 内存页跨 node 是主要开销），collector 与 learner 同 node 的局部性收益远大于带宽减半的损失。
 - CPU affinity：`os.sched_setaffinity` 绑到 node 的 CPU 列表（sysfs `node{X}/cpulist`）；配置 `cpus_per_collector` 时进一步切成不重叠的连续分片，避免 collector 之间抢核。
-- 内存策略：libnuma 的 `set_membind`（ctypes 加载，numactl 同款调用）把该进程**后续**分配绑到本地 node——因此绑定发生在 worker 进程的第一行（父进程在 spawn 前预绑，保证 import 期分配也 node 本地），先于 env / staging / pinned buffer 的任何分配。libnuma 不可用或 node 未知时告警并沿用 OS 默认放置，单 NUMA 机器与容器行为不变。
+- 内存策略：经 libnuma 调用并检查返回值的 `set_mempolicy(MPOL_BIND)`（ctypes 加载）把该进程**后续**分配绑到本地 node——因此绑定发生在 worker 进程的第一行（父进程在 spawn 前预绑，保证 import 期分配也 node 本地），先于 env / staging / pinned buffer 的任何分配。libnuma 不可用或 node 未知时告警并沿用 OS 默认放置，单 NUMA 机器与容器行为不变。
 
 **collector 推理设备**：多 collector 改变 CPU/CUDA 推理的权衡（N 个 CUDA collector 与 learner 产生 N 倍 H2D/D2H burst 争用）。首版保持默认 `collector_inference_device="cuda"`（与单 collector 一致），以实测吞吐决定多 collector 场景默认值是否调整。
 

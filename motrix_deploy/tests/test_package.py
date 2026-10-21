@@ -3,19 +3,29 @@
 
 """Package boundary and command-line smoke tests."""
 
+import re
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
 
 import motrix_deploy
 
+_PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+
 
 def test_package_version() -> None:
-    assert motrix_deploy.__version__ == "0.3.0"
+    """The boundary version mirrors the release version declared in pyproject.toml."""
+    declared = re.search(r'^version = "(.+)"$', _PYPROJECT.read_text(), re.MULTILINE)
+    assert declared is not None, f"Missing version in {_PYPROJECT}"
+    assert motrix_deploy.__version__ == declared.group(1)
 
 
+@pytest.mark.integration
 def test_cli_help() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "motrix_deploy.cli", "--help"],
+        [sys.executable, "-m", "motrixlab.cli", "deploy", "--help"],
         check=False,
         capture_output=True,
         text=True,
@@ -26,6 +36,7 @@ def test_cli_help() -> None:
     assert "Powered by Hydra" in result.stdout
 
 
+@pytest.mark.integration
 def test_import_does_not_load_optional_or_training_packages() -> None:
     forbidden = (
         "motrix_deploy_mujoco",

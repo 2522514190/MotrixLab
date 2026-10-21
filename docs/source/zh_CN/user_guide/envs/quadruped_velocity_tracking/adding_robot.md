@@ -66,7 +66,7 @@ class MyQuadruped(QuadrupedRobotCfg):
 完成 robot registry 注册后，先独立预览模型：
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
+mxlab view robot=<robot-config-id>
 ```
 
 ## 2. 提供任务传感器
@@ -163,7 +163,8 @@ registry.env("<robot>-walk-flat")(QuadrupedWalkTask)
 registry.env("<robot>-walk-rough")(QuadrupedWalkTask)
 ```
 
-随后从 `motrix_envs/locomotion/quadruped/__init__.py` 导入新模块，确保 `import motrix_envs` 时完成注册。
+随后从 `motrix_envs/locomotion/quadruped/__init__.py` 导入新模块，让内置注册回调包含它。
+独立 package 的发布方式见[环境注册](../../tutorial/building_envs/direct_env.md#环境注册)。
 `registry.env(...)` 与 `@registry.envcfg(...)` 的 ID 必须完全一致；只提供平地配置时，只注册平地 Env ID。
 
 ## 6. 增加训练配置
@@ -190,10 +191,10 @@ SKRL 配置选择 `/algo_base@algo: skrl.ppo`，并将 `task.rllib` 设为 `skrl
 建议按以下顺序验证：
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
-python scripts/view.py env=<robot>-walk-flat
-python scripts/view.py env=<robot>-walk-rough
-python scripts/train.py task=<robot>-walk-flat/rslrl.ppo
+mxlab view robot=<robot-config-id>
+mxlab view env=<robot>-walk-flat
+mxlab view env=<robot>-walk-rough
+mxlab train task=<robot>-walk-flat/rslrl.ppo
 ```
 
 预览时重点检查默认姿态、动作方向、四脚接触、足端位置参考系和粗糙地形出生高度。

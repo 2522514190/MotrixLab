@@ -36,6 +36,7 @@ def _config(scene=None):
     )
 
 
+@pytest.mark.integration
 def test_complete_scene_copies_all_fields_without_reconstructing_derived_contacts() -> None:
     @configclass
     class DerivedScene(SceneCfg):
@@ -62,6 +63,7 @@ def test_complete_scene_copies_all_fields_without_reconstructing_derived_contact
     assert source.objs.platform.height == 0.2
 
 
+@pytest.mark.integration
 def test_complete_scene_reuses_one_copy_without_inserting_another_robot() -> None:
     robot = UnitreeGo2Robot(translation=(4, 5, 6), rotation=(0, 0, 1, 0))
     scene = SceneCfg(objs=AdapterSceneObjsCfg(robot=robot, floor=FlatTerrainCfg()))
@@ -77,6 +79,7 @@ def test_complete_scene_reuses_one_copy_without_inserting_another_robot() -> Non
     assert robot.translation == (4, 5, 6)
 
 
+@pytest.mark.integration
 def test_file_scene_and_custom_objects_preserved_placement_has_no_double_transform(tmp_path) -> None:
     path = tmp_path / "world.xml"
     path.write_text(
@@ -89,7 +92,7 @@ def test_file_scene_and_custom_objects_preserved_placement_has_no_double_transfo
     backend.open()
     try:
         state = backend.robot.read_state(0.1)
-        np.testing.assert_allclose(state.base_position, backend.model.qpos0[:3])
+        np.testing.assert_allclose(backend.data.xpos[backend.robot._base_body_id], backend.model.qpos0[:3])
         np.testing.assert_allclose(state.base_orientation_xyzw, robot.rotation, atol=1e-6)
         np.testing.assert_allclose(backend.model.geom("obstacle").pos, [5, 6, 7])
         assert backend.model.geom("platform").pos[2] == pytest.approx(0.2)
@@ -105,6 +108,7 @@ def test_file_scene_and_custom_objects_preserved_placement_has_no_double_transfo
 
 
 @pytest.mark.parametrize("rotation", [None, (0.6, 0.0, 0.0, 0.8)])
+@pytest.mark.integration
 def test_robot_attach_transform_and_init_key_pose_are_reset_once(rotation) -> None:
     import mujoco
 
@@ -131,18 +135,35 @@ def test_robot_attach_transform_and_init_key_pose_are_reset_once(rotation) -> No
     with runtime:
         for _ in range(2):
             state = runtime.robot.read_state(0.1)
-            np.testing.assert_allclose(state.base_position, expected_position, atol=1e-6)
+            np.testing.assert_allclose(runtime.data.xpos[runtime.robot._base_body_id], expected_position, atol=1e-6)
             np.testing.assert_allclose(state.base_orientation_xyzw, expected_quat[[1, 2, 3, 0]], atol=1e-6)
             np.testing.assert_allclose(state.joint_position, robot.key_pose.poses["custom"], atol=1e-6)
             runtime.data.qpos[:] = 0.0
             runtime.data.qvel[:] = 1.0
-            runtime.reset(runtime.robot._joint_qpos_indices, runtime.robot.spec.default_joint_position)
+            runtime.reset(runtime.robot._joint_qpos_indices, runtime.initial_joint_position(runtime.robot.spec))
             np.testing.assert_array_equal(runtime.data.qvel, 0.0)
     assert scene.objs.robot.translation == translation and scene.objs.robot.rotation == rotation
 
 
+@pytest.mark.integration
+def test_scene_init_pose_preserves_artifact_default_and_clips_servo_limits() -> None:
+    from motrix_deploy.runtime.config import SimulationRuntimeConfig
+    from motrix_deploy.runtime.factory import create_simulation_runtime
+
+    scene = SceneCfg(objs=AdapterSceneObjsCfg(robot=UnitreeGo2Robot(init_key_pose="lie_down")))
+    runtime = create_simulation_runtime(
+        "mujoco", SimulationRuntimeConfig(scene=scene, sensor_bindings=_config().sensor_bindings)
+    )
+    with runtime:
+        spec = runtime.robot.spec
+        expected = np.clip(scene.objs.robot.key_pose.poses["lie_down"], spec.position_lower, spec.position_upper)
+        np.testing.assert_allclose(runtime.robot.read_state(0.1).joint_position, expected, atol=1e-6)
+        np.testing.assert_allclose(spec.default_joint_position, scene.objs.robot.key_pose.poses["default"])
+        assert scene.objs.robot.init_key_pose == "lie_down"
+
+
+@pytest.mark.integration
 def test_environment_scene_is_resolved_by_application_before_backend() -> None:
-    import motrix_envs  # noqa: F401 registers configurations for this application test
     from motrix_env_core import registry
 
     source = registry.make_env_config("go2-walk-rough", mode="play").scene
@@ -151,12 +172,13 @@ def test_environment_scene_is_resolved_by_application_before_backend() -> None:
     try:
         assert backend.model.njnt == 13
         assert backend.scene is not source
-        np.testing.assert_allclose(backend.robot.read_state(0.1).base_position, backend.model.qpos0[:3])
+        np.testing.assert_allclose(backend.data.xpos[backend.robot._base_body_id], backend.model.qpos0[:3])
     finally:
         backend.close()
 
 
 @pytest.mark.parametrize("failure", ["prepare", "bind", "viewer"])
+@pytest.mark.integration
 def test_failed_open_releases_session_and_viewer_idempotently(failure, monkeypatch) -> None:
     class Viewer:
         running = False
@@ -202,6 +224,7 @@ def test_failed_open_releases_session_and_viewer_idempotently(failure, monkeypat
         backend.robot.read_state(0.1)
 
 
+@pytest.mark.integration
 def test_robot_io_lifecycle_preserves_world_and_rebinds_on_runtime_reopen(control_scene_config) -> None:
     from motrix_deploy.contracts import JointTorqueCommand
     from motrix_deploy.robot.interface import RobotInterface
@@ -257,28 +280,17 @@ def test_physics_requires_integral_substeps() -> None:
 
 
 @pytest.mark.parametrize("gravity,tolerance", [((0.3, -0.2, -4.1), 2e-7), ((-0.1, 0.4, -6.3), 3e-6)])
-def test_public_factory_forwards_shared_physics_once_to_compiler(monkeypatch, gravity, tolerance) -> None:
+@pytest.mark.integration
+def test_public_factory_applies_supplied_physics(gravity, tolerance) -> None:
     from motrix_deploy.runtime.config import SimulationRuntimeConfig
     from motrix_deploy.runtime.factory import create_simulation_runtime
 
     physics = SimCfg(dt=0.003, solver_iterations=17, solver_tolerance=tolerance, gravity=gravity)
     config = _config()
-    calls = []
-    original = MuJoCoSceneCompiler.create_spec
-
-    def create_spec(compiler, scene, sim):
-        calls.append(sim)
-        return original(compiler, scene, sim)
-
-    monkeypatch.setattr(MuJoCoSceneCompiler, "create_spec", create_spec)
     runtime = create_simulation_runtime(
         "mujoco", SimulationRuntimeConfig(scene=config.scene, physics=physics, sensor_bindings=config.sensor_bindings)
     )
-    assert runtime.config.physics is physics
-    assert runtime.config.sensor_bindings is config.sensor_bindings
     with runtime:
-        assert calls == [physics]
-        assert calls[0] is physics
         assert runtime.model.opt.timestep == physics.dt
         assert runtime.model.opt.iterations == physics.solver_iterations
         assert runtime.model.opt.tolerance == physics.solver_tolerance
@@ -287,6 +299,7 @@ def test_public_factory_forwards_shared_physics_once_to_compiler(monkeypatch, gr
 
 @pytest.mark.parametrize("render", [False, True])
 @pytest.mark.parametrize("realtime", [None, False, True])
+@pytest.mark.integration
 def test_direct_runtime_and_plugin_use_config_render_and_realtime(control_scene_config, render, realtime) -> None:
     from motrix_deploy_mujoco.plugin import create_runtime as create_plugin_runtime
     from motrix_deploy_mujoco.runtime import MujocoRuntime
@@ -301,6 +314,7 @@ def test_direct_runtime_and_plugin_use_config_render_and_realtime(control_scene_
         assert runtime.model is None and runtime.data is None
 
 
+@pytest.mark.integration
 def test_artifact_recipe_normalizes_to_simulation_config(control_scene_config) -> None:
     from motrix_deploy_mujoco.plugin import create_runtime as create_plugin_runtime
 
@@ -327,6 +341,7 @@ def test_artifact_recipe_normalizes_to_simulation_config(control_scene_config) -
     assert runtime.robot.spec.joint_names == tuple(config.scene.objs.robot.key_pose.joint_names)
 
 
+@pytest.mark.integration
 def test_public_simulation_factory_returns_model_derived_robot_spec() -> None:
     from motrix_deploy.runtime.base import SimulationRuntime
     from motrix_deploy.runtime.config import SimulationRuntimeConfig
@@ -350,6 +365,7 @@ def test_public_simulation_factory_returns_model_derived_robot_spec() -> None:
 
 
 @pytest.mark.parametrize("field", ["default_joint_position", "position_lower", "position_upper", "torque_limit"])
+@pytest.mark.integration
 def test_artifact_robot_vectors_are_compared_against_derived_spec(field) -> None:
     runtime = create_runtime(_config(), control_period_s=0.02)
     actual = runtime.robot.spec
@@ -360,6 +376,7 @@ def test_artifact_robot_vectors_are_compared_against_derived_spec(field) -> None
 
 
 @pytest.mark.parametrize("field", ["default_joint_position", "position_lower", "position_upper", "torque_limit"])
+@pytest.mark.integration
 def test_artifact_robot_vector_comparison_uses_absolute_tolerance(field) -> None:
     runtime = create_runtime(_config(), control_period_s=0.02)
     actual = runtime.robot.spec

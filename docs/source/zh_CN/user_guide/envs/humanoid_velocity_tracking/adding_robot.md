@@ -113,7 +113,7 @@ asset = AssetCfg(
 建议先运行机器人预览命令检查关节顺序、默认姿态、PD 参数、脚底 site 和碰撞体名称：
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
+mxlab view robot=<robot-config-id>
 ```
 
 ## 4. 注册环境实现
@@ -125,9 +125,10 @@ registry.env("<robot>-walk-flat")(HumanoidVelocityTrackingEnv)
 registry.env("<robot>-walk-terrain")(HumanoidVelocityTrackingEnv)
 ```
 
-随后在 `motrix_envs/locomotion/humanoid/__init__.py` 中导入新的 `<robot>` 模块，确保 `import motrix_envs` 时配置和环境
-实现都会完成注册。`registry.env(...)` 的环境 ID 必须与对应 `@registry.envcfg(...)` 的配置 ID 完全一致。若只定义平地
-配置，则只注册平地环境 ID；起伏地形配置的派生方式见[“配置覆盖与调参”](config_tuning.md)。
+随后在 `motrix_envs/locomotion/humanoid/__init__.py` 中导入新的 `<robot>` 模块，让内置注册回调包含它。
+独立 package 的发布方式见[环境注册](../../tutorial/building_envs/direct_env.md#环境注册)。
+`registry.env(...)` 的环境 ID 必须与对应 `@registry.envcfg(...)` 的配置 ID 完全一致。若只定义平地配置，则只注册平地
+环境 ID；起伏地形配置的派生方式见[“配置覆盖与调参”](config_tuning.md)。
 
 ## 5. 增加训练配置
 
@@ -155,11 +156,11 @@ algo:
 建议按以下顺序验证：
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
-python scripts/view.py env=<robot>-walk-flat
-python scripts/view.py env=<robot>-walk-terrain
-python scripts/train.py task=<robot>-walk-flat/motrix.fastsac
-python scripts/train.py task=<robot>-walk-flat/motrix.fastsac algo.asynchronous=false
+mxlab view robot=<robot-config-id>
+mxlab view env=<robot>-walk-flat
+mxlab view env=<robot>-walk-terrain
+mxlab train task=<robot>-walk-flat/motrix.fastsac
+mxlab train task=<robot>-walk-flat/motrix.fastsac algo.asynchronous=false
 python -m pytest motrix_envs/tests/test_humanoid_walk.py -q
 python -m pytest motrix_rl/tests/test_task_configs.py -q
 ```

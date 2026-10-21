@@ -117,7 +117,7 @@ environment construction.
 Preview the robot and verify joint ordering, the default pose, PD parameters, sole sites, and collision-geom names:
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
+mxlab view robot=<robot-config-id>
 ```
 
 ## 4. Register the environment implementation
@@ -130,9 +130,10 @@ registry.env("<robot>-walk-flat")(HumanoidVelocityTrackingEnv)
 registry.env("<robot>-walk-terrain")(HumanoidVelocityTrackingEnv)
 ```
 
-Import the new `<robot>` module from `motrix_envs/locomotion/humanoid/__init__.py`, so `import motrix_envs` performs both
-config and environment registration. Each `registry.env(...)` ID must exactly match its `@registry.envcfg(...)` ID. If
-the task only has a flat-ground config, register only that ID. See
+Import the new `<robot>` module from `motrix_envs/locomotion/humanoid/__init__.py` so the built-in registration
+callback includes it. For a standalone package, follow [Environment registration](../../tutorial/building_envs/direct_env.md#environment-registration).
+Each `registry.env(...)` ID must exactly match its `@registry.envcfg(...)` ID. If the task only has a flat-ground config,
+register only that ID. See
 [Config Overrides and Tuning](config_tuning.md) for deriving a terrain config.
 
 ## 5. Add training configs
@@ -163,11 +164,11 @@ dynamics and training behavior.
 Use this progression:
 
 ```bash
-python scripts/view.py robot=<robot-config-id>
-python scripts/view.py env=<robot>-walk-flat
-python scripts/view.py env=<robot>-walk-terrain
-python scripts/train.py task=<robot>-walk-flat/motrix.fastsac
-python scripts/train.py task=<robot>-walk-flat/motrix.fastsac algo.asynchronous=false
+mxlab view robot=<robot-config-id>
+mxlab view env=<robot>-walk-flat
+mxlab view env=<robot>-walk-terrain
+mxlab train task=<robot>-walk-flat/motrix.fastsac
+mxlab train task=<robot>-walk-flat/motrix.fastsac algo.asynchronous=false
 python -m pytest motrix_envs/tests/test_humanoid_walk.py -q
 python -m pytest motrix_rl/tests/test_task_configs.py -q
 ```

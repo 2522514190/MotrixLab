@@ -11,6 +11,7 @@ MotrixLab 是构建在 MotrixSim 仿真后端之上的强化学习框架，提�
 
 项目使用 UV workspace，包含以下 package：
 
+- `motrixlab`：提供统一 CLI `mxlab` 与跨组件可视化的应用集成包，默认安装 core、deploy、RL、builtin provider 与 MotrixSim 环境后端
 - `motrix_env_core`：backend 无关的环境框架、配置与机器人 registry
 - `motrix_env_motrixsim`：MotrixSim 仿真后端（SimBackend、scene compiler、renderer、torch frontend）
 - `motrix_env_mujoco`：仅用于编译的 MuJoCo scene 后端
@@ -26,8 +27,12 @@ MotrixLab 是构建在 MotrixSim 仿真后端之上的强化学习框架，提�
 - `motrix_deploy_unitree`：Unitree 硬件配置、sensor/actuation 接线与 SDK2 DDS 硬件后端插件
 - `motrix_deploy_tasks`：具体部署任务实现
 
-`scripts/` 提供训练、可视化、评估入口。内置环境由环境 package 注册并通过项目 registry 暴露；simulator backend
-通过项目 backend registry 选择，core package 不依赖任何具体 simulator 实现。
+`motrixlab` 提供唯一的 `mxlab` 入口，在 `motrixlab.commands.view` 实现环境与机器人可视化，并在 `motrixlab.configs` 打包 `view.yaml`。
+`train`、`play`、`export-onnx`、`export-deploy` 分发到 `motrix_rl.commands`，`deploy` 分发到 `motrix_deploy.cli`；
+组件命令实现与内部可调用 adapter 保持在各自 package 中，不提供独立模块 CLI。
+版本查询只使用 `mxlab --version`。环境与机器人可视化使用 `mxlab view`；`scripts/` 保留其他仓库辅助工具。
+内置环境由环境 package 注册并通过项目 registry 暴露；simulator backend 通过项目 backend registry 选择，
+core package 不依赖任何具体 simulator 实现。
 
 ## 编码规范
 
@@ -61,6 +66,16 @@ Review 或修改 initializer 时：
 - 检查仓库使用方、文档、环境/插件注册和 import 环风险；
 - 清理后验证 package import 与注册行为。
 
+### Package README
+
+README 从宏观上说明 package：它提供什么能力、如何安装与使用、以及该 package 特有的契约与边界。不要把 README
+写成实现文档——内部数值（增益、维度、阈值列表）、actor 数学公式、逐字段契约说明、调度器/时钟语义等应留在代码、
+设计文档（`wiki/`）或用户教程（`docs/`）中，README 最多以一两句话概括并链接过去。不要叙述修改历史、调试过程或
+对旧实现/历史报告作辩护。
+
+框架级契约（Runtime/ControlSession/Controller 语义、rollout result 口径等）只在一处维护——对应框架 package 的
+README 或教程；插件与任务 package 的 README 不重复这些内容，只描述本 package 特有的部分。
+
 ### Manager Kernel 入口方法
 
 Manager fused-kernel 入口方法必须用 `@dispatch` 装饰，绝不使用 `@njit`——Numba 编译、缓存和内联由 manager
@@ -78,7 +93,7 @@ Python 方法，由 manager 运行时契约定义（`wiki/design/manager/runtime
 ### RL 任务配置规范
 
 - RL provider 配置使用对应插件包的 `@dataclass` 配置类：SKRL 使用 `motrix_rl_skrl.config.SkrlCfg`，RSLRL 使用 `motrix_rl_rslrl.cfg.RslrlCfg`，FastSAC 使用 `motrix_rl_builtin.fastsac.config.FastSacCfg`。
-- provider 配置的字段结构必须与对应的 `configs/algo_base/*.yaml` 保持一致；不要使用已经删除的 `@rlcfg` 或旧的嵌套结构。
+- provider 配置的字段结构必须与对应的 `motrix_rl/src/motrix_rl/configs/algo_base/*.yaml` 保持一致；不要使用已经删除的 `@rlcfg` 或旧的嵌套结构。
 - 超参数在配置对象初始化或明确的配置组装流程中赋值；同一环境的多个变体应通过配置复用，子变体只覆写实际差异。
 - SKRL 和 RSLRL 的 provider 配置结构不同，不要为了统一接口强行增加无用的兼容层；框架通过 provider 的 `config_type` 和 trainer context 选择对应实现。
 
@@ -91,7 +106,20 @@ Python 方法，由 manager 运行时契约定义（`wiki/design/manager/runtime
 
 ### 测试规范
 
-- `tests/` 下的测试应面向通用功能、公共接口、行为契约和不变量，确保实现变化不会破坏框架能力。
+- 根目录及各 package 的长期测试应面向通用功能、公共接口、行为契约和不变量，确保实现变化不会破坏框架能力。长期测试保护长期契约，一次性验收证明本次改动，不要混淆两者。
+- 新增测试前，明确它保护的契约、能够发现的真实错误，以及是否能用更小、更稳定的测试覆盖同样风险。不要为了覆盖率或证明某次配置搬迁而机械新增测试。
+- 优先测试可观察的输入输出、状态转换和错误处理，不绑定内部函数调用顺序或实现结构，除非它们本身就是公共契约。修复可复现缺陷时，优先保留最小回归测试，不复制整套任务或运行环境。
+- 不要在测试中重复抄写实现或配置作为唯一的正确性依据。版本、内部依赖等跨文件一致性规则可以测试，但应断言关系或不变量，而不是固定当前版本号。
+
+#### 测试分层与成本
+
+- 单元测试应快速、确定、范围小，不依赖网络、真实 GPU 或外部服务。模块协作、插件和 CLI 行为归入集成测试；依赖解析、包构建与安装闭包归入安装/发布验收；实际 GPU 运行、训练和性能验证使用专门环境。
+- 优先用较低成本的测试保护行为。联网解析、创建临时 Git 仓库、调用包管理器、解析第三方 CLI 输出或搭建完整环境的验证，若只服务于本次依赖调整或迁移，应作为一次性验收，不保留为长期测试。
+- 只有当高成本验证保护明确、持续支持的跨系统契约，且轻量测试不足时，才保留为长期集成/安装测试；明确执行入口、所需环境和维护归属，与默认单元测试分开。默认跳过或增加 opt-in 开关不能单独构成保留理由。
+- 在 PR 中记录实际执行的验收命令和结果，并区分依赖解析、安装计划、实际安装及硬件运行；不要用 dry-run 或元数据检查声称运行时兼容。
+
+#### 配置与迁移验收
+
 - 不应针对具体任务配置中的固定数值编写测试，例如 reward scale、默认姿态、训练超参数或其他可能随调参变化的值。
 - 不应为纯配置的缺失状态编写负向单元测试，例如断言某个环境注册名、配置字段、preset 或兼容 alias 不存在。删除这类配置时，
   应通过引用扫描、静态检查和现存功能的正向行为测试完成验收。
@@ -107,9 +135,11 @@ Python 方法，由 manager 运行时契约定义（`wiki/design/manager/runtime
 
 ## 开发环境
 
-项目使用 UV 管理依赖，Python 版本要求 3.10.\*。可用的依赖组与 extras 见 `pyproject.toml`。
+项目使用 UV 管理依赖，默认 Python 3.10；不含 Unitree 硬件部署插件的仿真与训练也支持 Python 3.11–3.13。
+Unitree 硬件部署插件与包含该插件的 `--all` 安装仍仅支持 Python 3.10；Unitree 机器人模型的仿真与训练不受此限制。
+根开发环境默认安装 `motrixlab`，提供 `mxlab` CLI。可用的依赖组与 extras 见 `pyproject.toml`。
 
-完整开发环境（全部 package、依赖组与 extras；`--gpu rocm` 切换 AMD wheel）：
+完整开发环境（Python 3.10，全部 package、依赖组与 extras；`--gpu rocm` 切换 AMD wheel）：
 
 ```bash
 sh install.sh --all
@@ -119,6 +149,8 @@ sh install.sh --all
 
 ```bash
 sh install.sh
+# 不含 Unitree 硬件部署插件的 Python 3.11–3.13 运行环境（以 3.13 为例）：
+sh install.sh --python 3.13
 ```
 
 避免裸 `uv run` / `uv sync`：`cuda`/`rocm` extras 声明为互斥，裸命令会解析到默认 fork（PyPI torch）
@@ -127,28 +159,28 @@ sh install.sh
 
 ## 常用命令
 
-train/play/view CLI 由 [Hydra](https://hydra.cc/) 驱动，参数使用 `key=value` 语法（不是 `--flag`）。可用选项见
-`configs/*.yaml`。
+train/play/view CLI 由 [Hydra](https://hydra.cc/) 驱动，参数使用 `key=value` 语法（不是 `--flag`）。
+CLI 用法与项目配置接入见 [motrix_rl/README.md](motrix_rl/README.md)。
 
 ### 训练
 
 SKRL（默认）：
 
 ```bash
-python scripts/train.py task=cartpole/skrl.ppo
+mxlab train task=cartpole/skrl.ppo
 ```
 
 RSLRL：
 
 ```bash
-python scripts/train.py task=cartpole/rslrl.ppo
+mxlab train task=cartpole/rslrl.ppo
 ```
 
 直接覆写框架运行时设置和类型化 RL 参数：
 
 ```bash
-python scripts/train.py task=cartpole/skrl.ppo num_envs=64 algo.agent.learning_rate=1e-3
-python scripts/train.py task=cartpole/skrl.ppo logging.interval=20 checkpoint.interval=100
+mxlab train task=cartpole/skrl.ppo num_envs=64 algo.agent.learning_rate=1e-3
+mxlab train task=cartpole/skrl.ppo logging.interval=20 checkpoint.interval=100
 ```
 
 ### 环境可视化
@@ -156,31 +188,37 @@ python scripts/train.py task=cartpole/skrl.ppo logging.interval=20 checkpoint.in
 不训练只查看环境：
 
 ```bash
-python scripts/view.py env=cartpole
+mxlab view env=cartpole
 ```
 
 查看内置机器人（不创建 RL 环境）：
 
 ```bash
-python scripts/view.py robot=g1-29dof
+mxlab view robot=g1-29dof
 ```
 
 ### 评估
 
 ```bash
-python scripts/play.py env=cartpole
+mxlab play env=cartpole
 ```
 
 指定 policy 文件：
 
 ```bash
-python scripts/play.py env=cartpole policy=<path/to/best.[pickle/pt]>
+mxlab play env=cartpole policy=<path/to/best.[pickle/pt]>
 ```
 
 ### ONNX 导出
 
 ```bash
-python scripts/export_onnx.py run_dir=<run-dir> output=/tmp/policy.onnx
+mxlab export-onnx run_dir=<run-dir> output=/tmp/policy.onnx
+```
+
+### 部署 artifact 导出
+
+```bash
+mxlab export-deploy run_dir=<run-dir> output=artifacts/policy.deploy
 ```
 
 ### 渲染
@@ -188,7 +226,7 @@ python scripts/export_onnx.py run_dir=<run-dir> output=/tmp/policy.onnx
 训练时开启可视化：
 
 ```bash
-python scripts/train.py task=cartpole/skrl.ppo render=true
+mxlab train task=cartpole/skrl.ppo render=true
 ```
 
 ### TensorBoard
@@ -200,8 +238,16 @@ tensorboard --logdir runs/{env-name}
 ### 测试
 
 ```bash
-python -m pytest
+# 与 PR CI 一致的快速测试（不执行集成、慢速或 Numba 编译测试）
+python -m pytest -m "not slow and not integration and not numba"
+# CPU 编译回归、跨模块/进程集成分别执行
+python -m pytest -m "not integration and (slow or numba)"
+python -m pytest -m integration
 ```
+
+`integration` 包含真实 HTTP、子进程/分布式、ONNX round-trip 及完整 simulator 集成等跨系统契约；
+依赖要求由对应 package/测试声明。真实 GPU 测试同样标记为 `integration`，仅在配置好运行时的专用环境执行；
+无 GPU 时的 skip 不替代执行分层。完整执行不加 `-m`，会包含这些测试。
 
 RL 测试按所有权组织：`motrix_rl/tests` 覆盖公共契约与控制面；`motrix_rl_builtin/tests`、
 `motrix_rl_skrl/tests`、`motrix_rl_rslrl/tests` 覆盖各插件实现；根目录 `tests/` 覆盖 workspace CLI 和 task 配置集成。
@@ -232,4 +278,4 @@ prek run --all-files
 ## 备注
 
 - JAX 与 PyTorch backend 均支持 CUDA。
-- MotrixSim package 使用内部 PyPI server。
+- MotrixSim（`motrixsim` / `motrixsim-core`）通过公开 PyPI 分发。

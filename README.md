@@ -5,7 +5,7 @@
 # MotrixLab
 
 [![GitHub License](https://img.shields.io/github/license/Motphys/MotrixLab)](LICENSE)
-![Python Version](https://img.shields.io/badge/python-3.10-blue)
+![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
 [![Release](https://img.shields.io/github/v/release/Motphys/MotrixLab?include_prereleases)](https://github.com/Motphys/MotrixLab/releases)
 [![Docs](https://img.shields.io/badge/docs-readthedocs-blue)](https://motrixlab.readthedocs.io)
 
@@ -52,11 +52,18 @@ _Microduck locomotion policies trained with MotrixLab, rendered in MotrixRender 
 
 ## 🚀 Quick Start
 
+Choose how you want to use MotrixLab:
+
+- **Run built-in tasks or contribute to the framework**: follow the repository quick start below. See the [repository installation guide](https://motrixlab.readthedocs.io/en/latest/user_guide/getting_started/installation.html#installation-repository) for full setup and development options.
+- **Use MotrixLab in your own project**: add `motrixlab` as a dependency with pip or uv. See [project dependency installation](https://motrixlab.readthedocs.io/en/latest/user_guide/getting_started/installation.html#installation-own-project) for commands, prerequisites, and GPU configuration. This path does not include repository tasks or robot assets.
+
+The following steps run a built-in task from the repository root.
+
 ### Prerequisites
 
 | Requirement | Notes |
 | --- | --- |
-| Python **3.10.x** | The workspace pins `==3.10.*` |
+| Python **3.10–3.13** | Default: 3.10 |
 | [uv](https://docs.astral.sh/uv/) | Python project and dependency manager — [installation guide](https://docs.astral.sh/uv/getting-started/installation/) |
 | [Git LFS](https://git-lfs.com) | Robot meshes, motion data, and videos are tracked by LFS |
 | OS | Linux x86_64 or Windows x86_64; the JAX training backend is Linux-only |
@@ -72,11 +79,15 @@ git lfs pull
 
 ### 2. Install dependencies
 
-Linux:
+Linux (Python 3.10 by default):
 
 ```bash
 sh install.sh
+# Python 3.11–3.13 for simulation/training without the Unitree hardware plugin (3.13 shown):
+sh install.sh --python 3.13
 ```
+
+Unitree hardware deployment and `--all` require Python 3.10; simulation/training with Unitree robot models can use Python 3.11–3.13.
 
 Windows (PowerShell):
 
@@ -88,13 +99,15 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 This auto-detects your GPU vendor (NVIDIA → CUDA, AMD → ROCm) and installs the runtime workspace packages with the matching PyTorch wheels, required SKRL Torch, and built-in FastSAC. Use `--gpu cuda|rocm` to override detection; `--rslrl` adds RSL-RL, while `--skrl-jax` adds the optional Linux-only SKRL JAX backend. `--skrl-torch` remains accepted as a compatibility flag because SKRL Torch is already required. Flags combine; see `sh install.sh --help`.
 
+The root development environment installs `motrixlab` by default, providing the `mxlab` CLI.
+
 ### 3. Train your first policy
 
 Activate the installed environment (Windows PowerShell: `.venv\Scripts\Activate.ps1`):
 
 ```bash
 source .venv/bin/activate
-python scripts/train.py task=microduck-walk-flat/motrix.fastsac play=true
+mxlab train task=microduck-walk-flat/motrix.fastsac play=true
 ```
 
 While training, the built-in dashboard shows live run progress, episode statistics, throughput, rewards, and system health:
@@ -120,7 +133,7 @@ Training finishes in minutes: mean return and episode length typically converge 
 Replay the latest trained policy without retraining (for example, after stopping training early with Ctrl+C):
 
 ```bash
-python scripts/play.py env=microduck-walk-flat
+mxlab play env=microduck-walk-flat
 ```
 
 A trained microduck policy replayed in the viewer:
@@ -138,7 +151,7 @@ MotrixLab ships 50+ built-in simulation environments spanning basic control, qua
 | <img src="docs/source/_static/images/poster/g1-wbt-dance.jpg" alt="g1-wbt-dance" width="240"> | Whole-body tracking (WBT) | `g1-wbt-dance` · `k1-wbt-freekick` · `g1-29dof-wbt-largebox` |
 
 ```bash
-python scripts/view.py env=go2-walk-rough
+mxlab view env=go2-walk-rough
 ```
 
 See the [full environment gallery](https://motrixlab.readthedocs.io/en/latest/user_guide/envs/index.html) for all registered environments and their supported training algorithms.
@@ -158,7 +171,7 @@ Seven reusable robot models are registered out of the box and can be combined in
 | <img src="docs/source/_static/images/robots/microduck.png" alt="microduck" width="180"> | `microduck` | Humanoid | 14 |
 
 ```bash
-python scripts/view.py robot=go2
+mxlab view robot=go2
 ```
 
 Use the public configuration API to compose a model directly:
@@ -178,6 +191,7 @@ MotrixLab is a [uv](https://docs.astral.sh/uv/) workspace with the following pac
 
 | Package | PyPI name | Description |
 | --- | --- | --- |
+| **motrixlab** | `motrixlab` | Application integration with the unified `mxlab` CLI and environment/robot visualization |
 | **motrix_deploy** | `motrix-deploy` | Artifacts, control sessions, runtime contracts, and deployment CLI |
 | **motrix_deploy_mujoco** | `motrix-deploy-mujoco` | MuJoCo deployment backend plugin |
 | **motrix_deploy_motrixsim** | `motrix-deploy-motrixsim` | Native MotrixSim deployment backend plugin |

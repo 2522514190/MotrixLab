@@ -115,13 +115,13 @@ rwd = distance_reward + target_bonus + continuous_reward + path_reward - center_
 ### 1. Environment Preview
 
 ```bash
-python scripts/view.py env=point_mass
+mxlab view env=point_mass
 ```
 
 ### 2. Start Training
 
 ```bash
-python scripts/train.py task=point_mass/skrl.ppo
+mxlab train task=point_mass/skrl.ppo
 ```
 
 ### 3. View Training Progress
@@ -133,7 +133,7 @@ tensorboard --logdir runs/point_mass
 ### 4. Test Training Results
 
 ```bash
-python scripts/play.py env=point_mass
+mxlab play env=point_mass
 ```
 
 ---

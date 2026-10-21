@@ -228,19 +228,19 @@ total_reward = stage_terms + ready_terms + push_terms - penalty_terms
 ### 1. 环境预览
 
 ```bash
-python scripts/view.py env=dm-quadruped-walk
-python scripts/view.py env=dm-quadruped-run
-python scripts/view.py env=dm-quadruped-escape
-python scripts/view.py env=dm-quadruped-fetch
+mxlab view env=dm-quadruped-walk
+mxlab view env=dm-quadruped-run
+mxlab view env=dm-quadruped-escape
+mxlab view env=dm-quadruped-fetch
 ```
 
 ### 2. 开始训练
 
 ```bash
-python scripts/train.py task=dm-quadruped-walk/skrl.ppo
-python scripts/train.py task=dm-quadruped-run/skrl.ppo
-python scripts/train.py task=dm-quadruped-escape/skrl.ppo
-python scripts/train.py task=dm-quadruped-fetch/skrl.ppo
+mxlab train task=dm-quadruped-walk/skrl.ppo
+mxlab train task=dm-quadruped-run/skrl.ppo
+mxlab train task=dm-quadruped-escape/skrl.ppo
+mxlab train task=dm-quadruped-fetch/skrl.ppo
 ```
 
 ### 3. 查看训练进度
@@ -255,10 +255,10 @@ tensorboard --logdir runs/dm-quadruped-fetch
 ### 4. 测试训练结果
 
 ```bash
-python scripts/play.py env=dm-quadruped-walk
-python scripts/play.py env=dm-quadruped-run
-python scripts/play.py env=dm-quadruped-escape
-python scripts/play.py env=dm-quadruped-fetch
+mxlab play env=dm-quadruped-walk
+mxlab play env=dm-quadruped-run
+mxlab play env=dm-quadruped-escape
+mxlab play env=dm-quadruped-fetch
 ```
 
 ---

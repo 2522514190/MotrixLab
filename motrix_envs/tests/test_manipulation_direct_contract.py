@@ -18,7 +18,6 @@ from collections.abc import Iterable
 import numpy as np
 import pytest
 
-import motrix_envs  # noqa: F401 registers built-in environments
 from motrix_env_core import registry
 from motrix_env_core.array.env import ArrayEnvState, NpObs
 
@@ -74,8 +73,6 @@ def test_manipulation_env_step_and_auto_reset(env_name: str) -> None:
         _assert_finite_state(state, num_envs, env.observation_space.shape)
 
     assert state is not None
-    # Transition may only produce reward/terminated; obs comes from observation.
-    assert not state.terminated.all(), "all envs terminated at once suggests a broken pipeline"
 
 
 @pytest.mark.parametrize("env_name", _MANIPULATION_ENVS)

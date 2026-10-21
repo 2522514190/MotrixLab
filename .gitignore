@@ -1,7 +1,6 @@
 __pycache__
 runs
 outputs
-/artifacts/
 .pdm-python
 logs
 .idea
@@ -16,3 +15,7 @@ docs/source/index.md
 .worktrees
 .obsidian
 /unitree_sdk2_python/
+build/
+dist/
+*.so
+*.egg-info/

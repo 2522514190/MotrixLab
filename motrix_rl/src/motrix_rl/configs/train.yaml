@@ -1,0 +1,33 @@
+defaults:
+  - train_schema
+  - _self_
+  # A null selection allows --help without a project task. The typed schema
+  # still requires a complete task recipe before training can start.
+  - task: null
+  # Console logging only; don't drop a <job>.log file in the working dir.
+  - override hydra/job_logging: stdout
+
+hydra:
+  # Training manages its own output layout under runs/{env}; keep Hydra from
+  # creating outputs/ dirs, dumping .hydra config, or changing the working dir.
+  output_subdir: null
+  run:
+    dir: .
+  sweep:
+    dir: .
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
+
+# Framework-neutral training runtime defaults shared by all task recipes.
+# `sim` names the registered SimBackend (see motrix_env_core.sim.registry).
+# It is accepted by direct and manager environments; unset resolves to the
+# registered default (motrixsim). Torch-fronted environments reject an
+# explicitly provided simulator here because they construct their own backend.
+sim: null
+logging:
+  backend: tensorboard
+  interval: 100
+
+checkpoint:
+  interval: 0

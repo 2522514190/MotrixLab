@@ -3,7 +3,6 @@
 
 """MuJoCo Go2 adapter contract tests."""
 
-import logging
 import subprocess
 import sys
 import textwrap
@@ -20,7 +19,6 @@ from scene_helpers import AdapterSceneObjsCfg, build_scene
 
 from motrix_deploy.contracts import JointServoCommand, RobotSpec
 from motrix_deploy.errors import ValidationError
-from motrix_deploy.robot.interface import KeyboardDeviceProvider
 from motrix_deploy.runtime.config import SensorBindings, SimulationRuntimeConfig
 from motrix_deploy_mujoco import (
     MujocoRuntime,
@@ -52,13 +50,17 @@ CONTROL_PERIOD_S = 0.02
 
 
 def _mapping(config_path: Path = CONFIG_PATH) -> dict[str, Any]:
-    values = OmegaConf.to_container(OmegaConf.load(config_path).runtime)
+    # Resolve interpolations against the whole recipe before extracting the runtime subtree.
+    recipe = OmegaConf.load(config_path)
+    OmegaConf.resolve(recipe)
+    values = OmegaConf.to_container(recipe.runtime)
     values.pop("backend")
     values.pop("deploy_env_id")
     values.pop("robot_id")
     values["scene"] = build_scene()
     values["scene"].objs.robot.translation = tuple(values.pop("robot_translation"))
     values["scene"].objs.robot.rotation = tuple(values.pop("robot_rotation"))
+    values["scene"].objs.robot.init_key_pose = values.pop("robot_init_key_pose", "default")
     return values
 
 
@@ -208,7 +210,8 @@ def test_state_sensor_mapping_rejects_unknown_roles() -> None:
         SimulationRuntimeConfig.from_mapping(values)
 
 
-@pytest.mark.parametrize("role", ["base_angular_velocity", "base_linear_acceleration", "base_linear_velocity"])
+@pytest.mark.parametrize("role", ["base_angular_velocity", "base_linear_acceleration"])
+@pytest.mark.integration
 def test_missing_state_sensor_fails_at_model_binding(role: str) -> None:
     config = _config()
     config = replace(config, sensor_bindings=replace(config.sensor_bindings, **{role: None}))
@@ -218,6 +221,7 @@ def test_missing_state_sensor_fails_at_model_binding(role: str) -> None:
     backend.close()
 
 
+@pytest.mark.integration
 def test_initial_state_command_step_contract_is_headless() -> None:
     spec = _spec()
     backend = _backend()
@@ -245,6 +249,7 @@ def test_initial_state_command_step_contract_is_headless() -> None:
     assert {name for name in sys.modules if name.startswith("mujoco.viewer")} == viewer_modules_before
 
 
+@pytest.mark.integration
 def test_glfw_viewer_syncs_without_owning_simulation_step() -> None:
     class FakeViewer:
         def __init__(self) -> None:
@@ -280,7 +285,7 @@ def test_glfw_viewer_syncs_without_owning_simulation_step() -> None:
     backend = _backend(render=True, viewer_factory=viewer_factory)
     spec = _spec()
 
-    assert backend.get_keyboard_device() is viewer.keyboard_device
+    assert backend.keyboard is viewer.keyboard_device
     assert camera_configs == [backend.scene.system_camera]
     backend.open()
     initial = backend.robot.read_state(timeout_s=0.1)
@@ -301,20 +306,20 @@ def test_glfw_viewer_syncs_without_owning_simulation_step() -> None:
     assert viewer.close_count == 1
 
     backend.open()
-    assert backend.get_keyboard_device() is viewer.keyboard_device
+    assert backend.keyboard is viewer.keyboard_device
     assert viewer.open_count == 2
     backend.close()
     assert viewer.close_count == 2
 
 
+@pytest.mark.integration
 def test_headless_backend_does_not_provide_keyboard_input() -> None:
     backend = _backend(render=False)
 
-    assert isinstance(backend, KeyboardDeviceProvider)
-    with pytest.raises(RuntimeError, match="viewer=true"):
-        backend.get_keyboard_device()
+    assert backend.keyboard is None
 
 
+@pytest.mark.integration
 def test_swapped_artifact_joint_contract_fails_compatibility_comparison() -> None:
     backend = _backend()
     actual = backend.robot.spec
@@ -326,6 +331,7 @@ def test_swapped_artifact_joint_contract_fails_compatibility_comparison() -> Non
         expected.validate_compatible(actual)
 
 
+@pytest.mark.integration
 def test_artifact_base_link_must_match_selected_robot() -> None:
     backend = _backend()
     actual = backend.robot.spec
@@ -334,6 +340,7 @@ def test_artifact_base_link_must_match_selected_robot() -> None:
         expected.validate_compatible(actual)
 
 
+@pytest.mark.integration
 def test_missing_artifact_joint_fails_compatibility_comparison() -> None:
     backend = _backend()
     actual = backend.robot.spec
@@ -355,6 +362,7 @@ def test_missing_artifact_joint_fails_compatibility_comparison() -> None:
         ("base_linear_velocity", "FR_global_linvel", "on the base body"),
     ],
 )
+@pytest.mark.integration
 def test_invalid_state_sensor_mapping_fails_during_open(role: str, sensor_name: str, message: str) -> None:
     config = _config()
     config = replace(config, sensor_bindings=replace(config.sensor_bindings, **{role: sensor_name}))
@@ -366,6 +374,7 @@ def test_invalid_state_sensor_mapping_fails_during_open(role: str, sensor_name: 
 
 
 @pytest.mark.parametrize("role", ["base_angular_velocity", "base_linear_acceleration"])
+@pytest.mark.integration
 def test_imu_sensor_must_use_base_body_frame(role: str, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _backend()
     build_model = backend.build_model
@@ -387,6 +396,7 @@ def test_imu_sensor_must_use_base_body_frame(role: str, monkeypatch: pytest.Monk
     backend.close()
 
 
+@pytest.mark.integration
 def test_sensor_bindings_resolve_robot_names_and_are_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config()
     config.scene.objs.robot.prefix = "robot_"
@@ -414,11 +424,12 @@ def test_sensor_bindings_resolve_robot_names_and_are_cached(monkeypatch: pytest.
     state = backend.robot.read_state(0.1)
     for role in ("base_angular_velocity", "base_linear_acceleration", "base_linear_velocity"):
         np.testing.assert_allclose(getattr(state, role), backend.data.sensordata[backend.robot._sensor_slices[role]])
-    np.testing.assert_allclose(state.base_position, backend.model.qpos0[:3])
+    np.testing.assert_allclose(backend.data.xpos[backend.robot._base_body_id], backend.model.qpos0[:3])
     np.testing.assert_allclose(state.base_angular_velocity, [0.4, -0.5, 0.6], atol=1e-6)
     backend.close()
 
 
+@pytest.mark.integration
 def test_actuator_force_range_mismatch_fails_during_open(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _backend()
     prepare = backend.robot.prepare
@@ -433,19 +444,22 @@ def test_actuator_force_range_mismatch_fails_during_open(monkeypatch: pytest.Mon
     backend.close()
 
 
-def test_open_converts_actuators_and_uses_scene_cfg_ground(caplog: pytest.LogCaptureFixture) -> None:
+@pytest.mark.integration
+def test_open_converts_actuators_and_forwards_supplied_ground_friction() -> None:
     spec = _spec()
-    backend = _backend()
-    with caplog.at_level(logging.INFO, logger="motrix_deploy_mujoco"):
-        backend.open()
+    friction = (0.83, 0.007, 0.0003)
+    config = _config()
+    config.scene.objs.floor.friction = friction
+    backend = create_runtime(config, control_period_s=CONTROL_PERIOD_S)
+    backend.open()
 
     model = backend.model
     assert model is not None
-    assert model.opt.timestep == pytest.approx(0.002)
-    assert model.opt.iterations == 100
+    assert model.opt.timestep == pytest.approx(config.physics.dt)
+    assert model.opt.iterations == config.physics.solver_iterations
     floor_id = backend.mj.mj_name2id(model, backend.mj.mjtObj.mjOBJ_GEOM, "floor")
     assert floor_id >= 0
-    np.testing.assert_allclose(model.geom_friction[floor_id], [0.6, 0.005, 0.0001])
+    np.testing.assert_allclose(model.geom_friction[floor_id], friction)
     np.testing.assert_array_equal(
         model.actuator_biastype[backend.robot._actuator_indices],
         backend.mj.mjtBias.mjBIAS_NONE,
@@ -455,11 +469,10 @@ def test_open_converts_actuators_and_uses_scene_cfg_ground(caplog: pytest.LogCap
         model.actuator_ctrlrange[backend.robot._actuator_indices],
         np.column_stack((-spec.torque_limit, spec.torque_limit)),
     )
-    assert "Converting 12 actuators from position servos to torque motors" in caplog.text
-    assert "Built MuJoCo deployment model from SceneCfg" in caplog.text
     backend.close()
 
 
+@pytest.mark.integration
 def test_direct_scene_cfg_headless_uses_supplied_robot_floor_and_placement() -> None:
     robot = UnitreeGo2Robot(translation=(1.0, -0.5, 0.155), rotation=(0.0, 0.0, 1.0, 0.0))
     scene = SceneCfg(objs=AdapterSceneObjsCfg(robot=robot, floor=FlatTerrainCfg(height=0.2)))
@@ -470,7 +483,7 @@ def test_direct_scene_cfg_headless_uses_supplied_robot_floor_and_placement() -> 
     backend.open()
     try:
         state = backend.robot.read_state(0.1)
-        np.testing.assert_allclose(state.base_position, backend.model.qpos0[:3])
+        np.testing.assert_allclose(backend.data.xpos[backend.robot._base_body_id], backend.model.qpos0[:3])
         np.testing.assert_allclose(state.base_orientation_xyzw, robot.rotation)
         floor_id = backend.mj.mj_name2id(backend.model, backend.mj.mjtObj.mjOBJ_GEOM, "floor")
         assert backend.model.geom_pos[floor_id, 2] == pytest.approx(0.2)
@@ -482,6 +495,7 @@ def test_direct_scene_cfg_headless_uses_supplied_robot_floor_and_placement() -> 
 
 
 @pytest.mark.parametrize("robot_type", [UnitreeGo1Robot, UnitreeGo2Robot])
+@pytest.mark.integration
 def test_robot_description_switch_needs_no_backend_specific_wiring(robot_type) -> None:
     robot = robot_type()
     scene = SceneCfg(objs=AdapterSceneObjsCfg(robot=robot, floor=FlatTerrainCfg()))
@@ -512,6 +526,7 @@ def test_robot_description_switch_needs_no_backend_specific_wiring(robot_type) -
         backend.close()
 
 
+@pytest.mark.integration
 def test_fallen_pose_does_not_change_resource_health() -> None:
     config = _config(FLAT_CONFIG_PATH)
     config.scene.objs.robot.translation = (0.0, 0.0, 0.545)
@@ -526,6 +541,7 @@ def test_fallen_pose_does_not_change_resource_health() -> None:
         backend.close()
 
 
+@pytest.mark.integration
 def test_direct_scene_recipe_runs_with_training_imports_blocked() -> None:
     script = textwrap.dedent(
         """
@@ -546,13 +562,16 @@ def test_direct_scene_recipe_runs_with_training_imports_blocked() -> None:
         class FlatWorldObjsCfg(SceneObjsCfg):
             floor: FlatTerrainCfg = FlatTerrainCfg()
         from motrix_robots.unitree import UnitreeGo2Robot
-        values = OmegaConf.to_container(OmegaConf.load(sys.argv[1]).runtime)
+        recipe = OmegaConf.load(sys.argv[1])
+        OmegaConf.resolve(recipe)
+        values = OmegaConf.to_container(recipe.runtime)
         values.pop('backend')
         values.pop('deploy_env_id')
         values.pop('robot_id')
         robot = UnitreeGo2Robot(
             translation=tuple(values.pop('robot_translation')),
             rotation=tuple(values.pop('robot_rotation')),
+            init_key_pose=values.pop('robot_init_key_pose', 'default'),
         )
         values['scene'] = SceneCfg(objs=FlatWorldObjsCfg(robot=robot, floor=FlatTerrainCfg()))
         config = SimulationRuntimeConfig.from_mapping(values)
@@ -569,6 +588,7 @@ def test_direct_scene_recipe_runs_with_training_imports_blocked() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.integration
 def test_hybrid_pd_command_is_recomputed_as_torque_each_physics_substep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

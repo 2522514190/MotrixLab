@@ -81,8 +81,9 @@ range。
 registry.env("g1-wbt-dance1-subject1")(ManagerEnv)
 ```
 
-该模块已经由 `motrix_envs.locomotion.wbt` package 导入，因此 `import motrix_envs` 会执行注册。`envcfg` 和 `env`
-名称必须完全一致。
+该模块已经由 `motrix_envs.locomotion.wbt` package 导入，因此内置注册回调会包含它。
+独立 package 的发布方式见[环境注册](../../tutorial/building_envs/direct_env.md#环境注册)。
+`envcfg` 和 `env` 名称必须完全一致。
 
 ## 5. 新增 Training Task
 
@@ -126,7 +127,7 @@ algo:
 先用小规模 smoke test 验证 Hydra composition、registry、tensor shape 和一步训练流程：
 
 ```bash
-python scripts/train.py task=g1-wbt-dance1-subject1/motrix.fastsac \
+mxlab train task=g1-wbt-dance1-subject1/motrix.fastsac \
   algo.asynchronous=true num_envs=64 algo.trainer.num_learning_iterations=100
 ```
 
@@ -134,13 +135,13 @@ python scripts/train.py task=g1-wbt-dance1-subject1/motrix.fastsac \
 `state.reward_terms` 与 `state.metrics` 能进入日志。随后使用默认规模训练：
 
 ```bash
-python scripts/train.py task=g1-wbt-dance1-subject1/motrix.fastsac algo.asynchronous=true
+mxlab train task=g1-wbt-dance1-subject1/motrix.fastsac algo.asynchronous=true
 ```
 
 生成 metadata-backed run 后回放策略：
 
 ```bash
-python scripts/play.py env=g1-wbt-dance1-subject1 num_envs=16
+mxlab play env=g1-wbt-dance1-subject1 num_envs=16
 ```
 
 Play 模式自动从第 0 帧开始，关闭 reset noise 和 adaptive sampler，并在 clip 结束后从头重播，无需单独注册 play 环境。
@@ -149,10 +150,10 @@ Play 模式自动从第 0 帧开始，关闭 reset noise 和 adaptive sampler，
 
 -   Motion 通过 schema 加载和目标机器人运动学 replay，且 `fps == 1 / ctrl_dt`。
 -   `envcfg`、`env` 和 Training Task 使用相同 Env ID。
--   Package 导入路径会执行新配置与环境注册。
+-   Registry 自动发现已安装的回调，并执行新配置与环境注册。
 -   Hydra 可以发现 `motrix.fastsac` Training Task，且 `algo.asynchronous` 能选择两种执行拓扑。
 -   小规模训练的 observation、action、reward、terminated 和 truncated shape 正确。
 -   Reset 没有系统性 NaN、hard-limit 违规或立即 bad-tracking。
 -   Reward、termination 和 adaptive-sampling 指标能够写入日志。
--   `play.py` 可以发现 run，并从第 0 帧完整回放策略。
+-   `mxlab play` 可以发现 run，并从第 0 帧完整回放策略。
 -   新 motion 包含来源与许可说明，并由 Git LFS 管理。

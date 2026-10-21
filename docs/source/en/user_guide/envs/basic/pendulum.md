@@ -62,20 +62,20 @@ Order: `cos(theta), sin(theta), angular velocity`.
 ### 1. Environment Preview
 
 ```bash
-python scripts/view.py env=pendulum
+mxlab view env=pendulum
 ```
 
 ### 2. Start Training
 
 ```bash
 # Train with default parameters
-python scripts/train.py task=pendulum/skrl.ppo
+mxlab train task=pendulum/skrl.ppo
 
 # Customize parallel environments
-python scripts/train.py task=pendulum/skrl.ppo num_envs=1024
+mxlab train task=pendulum/skrl.ppo num_envs=1024
 
 # Enable rendering during training
-python scripts/train.py task=pendulum/skrl.ppo render=true
+mxlab train task=pendulum/skrl.ppo render=true
 ```
 
 ### 3. View Training Progress
@@ -88,10 +88,10 @@ tensorboard --logdir runs/pendulum
 
 ```bash
 # Auto-discover best policy (recommended)
-python scripts/play.py env=pendulum
+mxlab play env=pendulum
 
 # Manually specify a checkpoint from a metadata-backed run
-python scripts/play.py env=pendulum policy=/path/to/run/checkpoints/policy-file
+mxlab play env=pendulum policy=/path/to/run/checkpoints/policy-file
 ```
 
 > **Tip**: Policies are auto-selected from `runs/pendulum/`. Use `policy=...` to select a checkpoint whose parent run contains `metadata.json`.
