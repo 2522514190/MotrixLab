@@ -18,8 +18,6 @@ from motrix_env_core.manager import (
     ManagerContext,
     ObservationTermCfg,
     ObsTerm,
-    RewardTerm,
-    RewardTermCfg,
     TerminationTerm,
     TerminationTermCfg,
 )

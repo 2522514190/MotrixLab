@@ -51,10 +51,10 @@ from motrix_envs.config.scene import StandardSceneCfg
 from motrix_envs.locomotion.wbt.cfg import CommandsCfg, ResetCfg, TerminationsCfg
 from motrix_envs.locomotion.wbt.g1.common import (
     G1_TRACKED_BODY_NAMES,
-    G1WbtEnvCfg,
-    G1WbtSceneObjsCfg,
     LARGE_BOX_DIR,
     MOTION_DIR,
+    G1WbtEnvCfg,
+    G1WbtSceneObjsCfg,
 )
 from motrix_envs.locomotion.wbt.mdp.command import WbtMotionCommandCfg
 from motrix_envs.locomotion.wbt.mdp.object import (
@@ -86,7 +86,6 @@ from motrix_envs.locomotion.wbt.mdp.reset import (
     BodyRotResetCfg,
     BodyRotVelResetCfg,
 )
-from motrix_envs.locomotion.wbt.mdp.terminations import BadBodyZTerminationCfg
 from motrix_envs.locomotion.wbt.mdp.rewards import (
     DofLimitRewardCfg,
     GlobalBodyAngularVelocityRewardCfg,
@@ -97,6 +96,7 @@ from motrix_envs.locomotion.wbt.mdp.rewards import (
     RelativeBodyPositionRewardCfg,
     UndesiredContactsRewardCfg,
 )
+from motrix_envs.locomotion.wbt.mdp.terminations import BadBodyZTerminationCfg
 from motrix_envs.locomotion.wbt.mdp.tracking_metrics import LargeBoxTrackingMetricsCfg
 
 
@@ -313,6 +313,7 @@ def make_omniretarget_cfg() -> OmniRetargetEnvCfg:
 
     return cfg
 
+
 class OmniRetargetEnv(ManagerEnv):
     """Task-only randomization and curriculum hooks; ManagerEnv owns lifecycle."""
 
@@ -335,9 +336,7 @@ class OmniRetargetEnv(ManagerEnv):
         contact_names = ("floor",) + tuple(
             f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
         )
-        self._contact_writes = self.sim.compile_writes(
-            {"friction": GeomFrictionWrite(contact_names)}, reset=False
-        )
+        self._contact_writes = self.sim.compile_writes({"friction": GeomFrictionWrite(contact_names)}, reset=False)
         contact_friction = self._contact_writes.buffer("friction")
         for index, name in enumerate(contact_names):
             contact_friction[:, index] = self.model.others["contact_friction_" + name]
@@ -380,12 +379,7 @@ class OmniRetargetEnv(ManagerEnv):
     def reset(self, env_ids, sim_reset_ids=None):
         # Update the Holosoma-style episode-length EMA only for actual episode
         # endings. Clip rematerialization and explicit resets cannot unlock it.
-        if (
-            env_ids.size
-            and self._state is not None
-            and self.cfg.object_curriculum.enabled
-            and not self.cfg.evaluation
-        ):
+        if env_ids.size and self._state is not None and self.cfg.object_curriculum.enabled and not self.cfg.evaluation:
             finished = env_ids[self._state.done[env_ids]]
             if finished.size:
                 weight = min(finished.size / self.cfg.object_curriculum.episode_window, 1.0)
