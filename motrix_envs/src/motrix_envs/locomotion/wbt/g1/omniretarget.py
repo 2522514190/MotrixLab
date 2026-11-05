@@ -38,8 +38,10 @@ from motrix_env_core.sim import (
     LinkPositionQuery,
     LinkQuaternionQuery,
 )
-from motrix_env_core.sim.model import LinkCenterOfMassQuery
+from motrix_env_core.sim.model import ActuatorKdQuery, LinkCenterOfMassQuery
 from motrix_env_core.sim.write import (
+    ActuatorDampingWrite,
+    ActuatorKpWrite,
     BodyAngularVelocityWrite,
     BodyLinearVelocityWrite,
     GeomFrictionWrite,
@@ -51,10 +53,10 @@ from motrix_envs.config.scene import StandardSceneCfg
 from motrix_envs.locomotion.wbt.cfg import CommandsCfg, ResetCfg, TerminationsCfg
 from motrix_envs.locomotion.wbt.g1.common import (
     G1_TRACKED_BODY_NAMES,
-    G1WbtEnvCfg,
-    G1WbtSceneObjsCfg,
     LARGE_BOX_DIR,
     MOTION_DIR,
+    G1WbtEnvCfg,
+    G1WbtSceneObjsCfg,
 )
 from motrix_envs.locomotion.wbt.mdp.command import WbtMotionCommandCfg
 from motrix_envs.locomotion.wbt.mdp.object import (
@@ -86,7 +88,6 @@ from motrix_envs.locomotion.wbt.mdp.reset import (
     BodyRotResetCfg,
     BodyRotVelResetCfg,
 )
-from motrix_envs.locomotion.wbt.mdp.terminations import BadBodyZTerminationCfg
 from motrix_envs.locomotion.wbt.mdp.rewards import (
     DofLimitRewardCfg,
     GlobalBodyAngularVelocityRewardCfg,
@@ -97,6 +98,7 @@ from motrix_envs.locomotion.wbt.mdp.rewards import (
     RelativeBodyPositionRewardCfg,
     UndesiredContactsRewardCfg,
 )
+from motrix_envs.locomotion.wbt.mdp.terminations import BadBodyZTerminationCfg
 from motrix_envs.locomotion.wbt.mdp.tracking_metrics import LargeBoxTrackingMetricsCfg
 
 
@@ -168,6 +170,7 @@ class OmniActionsCfg(ManagerActionsCfg):
         action_scale=0.25,
         action_scales_by_effort_limit_over_p_gain=True,
         safety_clip_fraction=0.95,
+        action_delay_steps=(0, 1),
     )
 
 
@@ -205,6 +208,9 @@ class OmniRandomizationCfg:
     enabled: bool = True
     # Keep the box physical domain randomization moderate while retaining the
     # nominal pose and the ability to learn contact robustness.
+    foot_friction_scale: tuple[float, float] = (0.5, 1.5)
+    actuator_gain_scale: tuple[float, float] = (0.9, 1.1)
+    joint_bias_rad: float = 0.01
     object_mass: tuple[float, float] = (0.1, 0.5)
     object_com: tuple[float, float, float] = (0.02, 0.02, 0.02)
     object_inertia_scale: tuple[float, float] = (0.8, 1.2)
@@ -277,12 +283,16 @@ class OmniRetargetEnvCfg(G1WbtEnvCfg):
             root_lin_vel=LinkLinearVelocityQuery(link="pelvis"),
             root_ang_vel=LinkAngularVelocityQuery(link="pelvis"),
         )
+        self.queries.model["dr_actuator_kd"] = ActuatorKdQuery()
         self.queries.model["torso_com"] = LinkCenterOfMassQuery(name="torso_link")
+        for name in ("floor",) + tuple(f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)):
+            self.queries.model["contact_friction_" + name] = GeomFrictionQuery(name=name)
         self.queries.model["box_friction"] = GeomFrictionQuery(name="largebox_collision")
 
     def for_play(self):
         cfg = super().for_play()
         cfg.randomization.enabled = False
+        cfg.actions.joint_position.action_delay_steps = (0, 0)
         cfg.evaluation = True
         cfg.randomize_initial_episode_progress = False
         cfg.sim_reset.object_state.noise_scale = 0.0
@@ -310,6 +320,7 @@ def make_omniretarget_cfg() -> OmniRetargetEnvCfg:
 
     return cfg
 
+
 class OmniRetargetEnv(ManagerEnv):
     """Task-only randomization and curriculum hooks; ManagerEnv owns lifecycle."""
 
@@ -329,6 +340,16 @@ class OmniRetargetEnv(ManagerEnv):
             },
             reset=False,
         )
+        contact_names = ("floor",) + tuple(
+            f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
+        )
+        self._contact_writes = self.sim.compile_writes({"friction": GeomFrictionWrite(contact_names)}, reset=False)
+        contact_friction = self._contact_writes.buffer("friction")
+        for index, name in enumerate(contact_names):
+            contact_friction[:, index] = self.model.others["contact_friction_" + name]
+        if cfg.randomization.enabled:
+            scales = self._dr_rng.uniform(*cfg.randomization.foot_friction_scale, size=num_envs)
+            contact_friction[:, :, 0] *= scales[:, None]
         self._push_writes = self.sim.compile_writes(
             {
                 "linear": BodyLinearVelocityWrite(("pelvis",)),
@@ -336,6 +357,20 @@ class OmniRetargetEnv(ManagerEnv):
             },
             reset=False,
         )
+        actuator_names = tuple(actuator.name for actuator in self.model.actuators)
+        self._actuator_writes = self.sim.compile_writes(
+            {"kp": ActuatorKpWrite(actuator_names), "kd": ActuatorDampingWrite(actuator_names)}, reset=False
+        )
+        for key, query in (("kp", "actuator_kp"), ("kd", "dr_actuator_kd")):
+            buffer = self._actuator_writes.buffer(key)
+            buffer[:] = self.model.others[query]
+            if cfg.randomization.enabled:
+                buffer *= self._dr_rng.uniform(*cfg.randomization.actuator_gain_scale, size=buffer.shape)
+        if cfg.randomization.enabled:
+            bias = self.action_terms["joint_position"].state.bias
+            bias[:] = self._dr_rng.uniform(
+                -cfg.randomization.joint_bias_rad, cfg.randomization.joint_bias_rad, size=bias.shape
+            )
         dr = cfg.randomization
         rng = self._dr_rng
         mass = rng.uniform(*dr.object_mass, size=num_envs) if dr.enabled else np.full(num_envs, 0.1)
@@ -365,12 +400,7 @@ class OmniRetargetEnv(ManagerEnv):
     def reset(self, env_ids, sim_reset_ids=None):
         # Update the Holosoma-style episode-length EMA only for actual episode
         # endings. Clip rematerialization and explicit resets cannot unlock it.
-        if (
-            env_ids.size
-            and self._state is not None
-            and self.cfg.object_curriculum.enabled
-            and not self.cfg.evaluation
-        ):
+        if env_ids.size and self._state is not None and self.cfg.object_curriculum.enabled and not self.cfg.evaluation:
             finished = env_ids[self._state.done[env_ids]]
             if finished.size:
                 weight = min(finished.size / self.cfg.object_curriculum.episode_window, 1.0)
@@ -391,6 +421,8 @@ class OmniRetargetEnv(ManagerEnv):
             # Native reset restores overrides; reapply physical parameters to
             # reset lanes, including motion-clip boundaries.
             self._domain_writes.execute(selected)
+            self._contact_writes.execute(selected)
+            self._actuator_writes.execute(selected)
         if env_ids.size:
             self._elapsed_since_reset[env_ids] = 0
             self._push_remaining[env_ids] = self._dr_rng.uniform(
