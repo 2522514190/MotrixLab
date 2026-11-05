@@ -28,7 +28,6 @@ from motrix_env_core.mdp.action import JointPositionActionCfg, JointPositionActi
 from motrix_env_core.mdp.noise import add_uniform_noise
 from motrix_env_core.numba.kernel_data import SharedArray, kernel_data
 from motrix_env_core.numba.manager.dispatch import dispatch
-from motrix_env_core.sim.read import SensorValuesQuery
 from motrix_envs.locomotion.wbt.mdp.observations import motion_reference_position_obs
 
 
@@ -38,21 +37,33 @@ class CalibratedActionState(JointPositionActionState):
 
 
 class CalibratedActionTerm(JointPositionActionTerm):
+    def __init__(self, action_space, state, safety_clip_fraction: float):
+        super().__init__(action_space, state)
+        self._safety_clip_fraction = np.float32(safety_clip_fraction)
+
     def _process(self, actions: np.ndarray) -> np.ndarray:
-        return super()._process(actions) + self.state.bias
+        state = self.state
+        target = super()._process(actions) + state.bias
+        midpoint = (state.joint_lower + state.joint_upper) * 0.5
+        half_range = (state.joint_upper - state.joint_lower) * (0.5 * self._safety_clip_fraction)
+        return np.clip(target, midpoint - half_range, midpoint + half_range)
 
 
 @configclass(kw_only=True)
 class CalibratedActionCfg(JointPositionActionCfg):
     """Calibration bias affects both PD setpoints and joint observations (BM S1)."""
 
+    safety_clip_fraction: float = 1.0
+
     def __call__(self, env, actuators):
+        if not 0.0 < self.safety_clip_fraction <= 1.0:
+            raise ValueError("safety_clip_fraction must be in (0, 1].")
         base = super().__call__(env, actuators)
         state = CalibratedActionState(
             **{item.name: getattr(base.state, item.name) for item in fields(JointPositionActionState)},
             bias=np.zeros((env.num_envs, base.action_space.shape[0]), dtype=np.float32),
         )
-        return CalibratedActionTerm(base.action_space, state)
+        return CalibratedActionTerm(base.action_space, state, self.safety_clip_fraction)
 
 
 @kernel_data
@@ -154,59 +165,6 @@ def object_rot6d(ctx: ManagerContext, out: np.ndarray) -> None:
 class ObjectRot6dObsCfg(ObservationTermCfg):
     def __call__(self, ctx) -> ObsTerm:
         return ObsTerm(6, object_rot6d)
-
-
-@kernel_data
-class SelfContactParams:
-    pairs: SharedArray
-    penalized: SharedArray
-    threshold: np.float32
-
-
-@dispatch
-def self_contact_penalty(ctx: ManagerContext, forces: np.ndarray, params: SelfContactParams) -> float:
-    net = np.zeros((params.penalized.size, 3), dtype=np.float32)
-    for pair in range(params.pairs.shape[0]):
-        first, second = params.pairs[pair]
-        # ContactSensor reports force in its contact basis. Rotate every
-        # pair's reduced force into world coordinates before summing bodies.
-        offset = 9 * pair
-        normal = forces[offset + 3 : offset + 6]
-        tangent = forces[offset + 6 : offset + 9]
-        bitangent = np.cross(normal, tangent)
-        for axis in range(3):
-            force = (
-                forces[offset] * normal[axis]
-                + forces[offset + 1] * tangent[axis]
-                + forces[offset + 2] * bitangent[axis]
-            )
-            net[first, axis] += force
-            net[second, axis] -= force
-    count = 0.0
-    for body in range(net.shape[0]):
-        if params.penalized[body] and math.sqrt(float(np.dot(net[body], net[body]))) > params.threshold:
-            count += 1.0
-    return count
-
-
-@configclass(kw_only=True)
-class SelfContactRewardCfg(RewardTermCfg):
-    threshold: float = 1.0
-
-    def __call__(self, ctx) -> RewardTerm:
-        sensors = ctx.cfg.scene.sensors
-        excluded = ctx.cfg.terminations.body_tracking.body_names
-        pairs = np.asarray(
-            [(sensors.geom_links[i], sensors.geom_links[j]) for i, j in sensors.contact_pairs()], dtype=np.int64
-        )
-        params = SelfContactParams(
-            pairs=pairs,
-            penalized=np.asarray([name not in excluded for name in sensors.links]),
-            threshold=np.float32(self.threshold),
-        )
-        return RewardTerm(
-            self_contact_penalty, SensorValuesQuery(sensors=tuple(name for name, _ in sensors.items())), params
-        )
 
 
 @dispatch

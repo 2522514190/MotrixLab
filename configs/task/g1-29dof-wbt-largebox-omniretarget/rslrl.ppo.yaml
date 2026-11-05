@@ -12,7 +12,7 @@ num_envs: 4096
 play_num_envs: 1
 seed: 1
 checkpoint:
-  interval: 4000
+  interval: 2000
 algo:
   num_steps_per_env: 24
   max_iterations: 30000

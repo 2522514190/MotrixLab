@@ -1,7 +1,7 @@
 # Copyright Motphys Technology Co., Ltd. 2026
 # SPDX-License-Identifier: Apache-2.0
 
-"""Behavior contracts for calibrated control, self contacts and staged tracking."""
+"""Behavior contracts for calibrated control and staged tracking."""
 
 import math
 from types import SimpleNamespace
@@ -11,14 +11,12 @@ import pytest
 
 from motrix_env_core import registry
 from motrix_env_core.sim.write import BodyPositionWrite
-from motrix_envs.locomotion.wbt.g1.omniretarget import OmniRetargetEnv, SelfContactSensorsCfg
+from motrix_envs.locomotion.wbt.g1.omniretarget import OmniRetargetEnv
 from motrix_envs.locomotion.wbt.mdp.omniretarget import (
     CalibratedPositionParams,
     ObjectTerminationGate,
-    SelfContactParams,
     calibrated_joint_positions,
     relative_rot6d_columns,
-    self_contact_penalty,
     staged_object_failure,
 )
 
@@ -48,20 +46,11 @@ def test_calibration_observation_uses_same_bias_as_action_in_joint_order():
     np.testing.assert_allclose(out, [0.37, 0.48], atol=1e-6)
 
 
-def test_self_contact_counts_bodies_once_and_excludes_allowed_end_effectors():
-    params = SelfContactParams(
-        pairs=np.array([[0, 1], [0, 2]], dtype=np.int64),
-        penalized=np.array([True, True, False]),
-        threshold=np.float32(2.0),
-    )
-
-    def report(first, second):
-        return np.array([*first, 1, 0, 0, 0, 1, 0, *second, 1, 0, 0, 0, 1, 0], dtype=np.float32)
-
-    assert self_contact_penalty(None, report([0, 0, 0], [0, 0, 0]), params) == 0
-    assert self_contact_penalty(None, report([3, 0, 0], [3, 0, 0]), params) == 2
-    # Two pair forces cancel at link 0; each link uses its net self-force.
-    assert self_contact_penalty(None, report([3, 0, 0], [-3, 0, 0]), params) == 1
+def test_omniretarget_uses_shared_undesired_contact_query():
+    cfg = registry.make_env_config("g1-29dof-wbt-largebox-omniretarget")
+    assert not tuple(cfg.scene.sensors.items())
+    assert "undesired_contact_forces" in cfg.queries.data
+    assert type(cfg.rewards.undesired_contacts).__name__ == "UndesiredContactsRewardCfg"
 
 
 def test_object_gate_suppresses_failure_but_keeps_diagnostics_and_uses_or():
@@ -94,48 +83,6 @@ def test_object_gate_suppresses_failure_but_keeps_diagnostics_and_uses_or():
     assert staged_object_failure(ctx, gate, np.float32(0.6), np.float32(0.7))
 
 
-def test_existing_geom_pair_sensors_measure_only_self_force_and_sum_per_body(tmp_path):
-    from motrix_env_core.base import SimCfg
-    from motrix_env_core.config.scene import SceneCfg
-    from motrix_env_core.sim.read import SensorValuesQuery
-    from motrix_env_motrixsim.runtime import MotrixSimBackend
-
-    source = tmp_path / "contacts.xml"
-    source.write_text(
-        '<mujoco><worldbody><body name="a" pos="-4 0 0"><freejoint/>'
-        '<geom name="ga" type="sphere" size="0.1" mass="1"/></body>'
-        '<body name="b"><freejoint/><geom name="gb" type="sphere" size="0.1" mass="1"/></body>'
-        '<body name="c" pos="4 0 0"><freejoint/>'
-        '<geom name="gc" type="sphere" size="0.1" mass="1"/></body>'
-        '<body name="object" pos="0 0.15 0"><freejoint/>'
-        '<geom name="external" type="sphere" size="0.1" mass="1"/></body></worldbody></mujoco>'
-    )
-    sensors = SelfContactSensorsCfg(links=("a", "b", "c"), geom_names=("ga", "gb", "gc"), geom_links=(0, 1, 2))
-    backend = MotrixSimBackend(SceneCfg(file=source, sensors=sensors), SimCfg(gravity=(0, 0, 0)), 1)
-    backend._model.reports.contact_forces = True
-    reads = backend.compile_reads({"force": SensorValuesQuery(sensors=tuple(name for name, _ in sensors.items()))})
-    backend.step(1)
-    reads.execute()
-    force = reads["force"][0]
-    assert force.shape == (27,)  # Force, normal and tangent, three pairs.
-    params = SelfContactParams(
-        pairs=np.asarray(list(sensors.contact_pairs()), dtype=np.int64),
-        penalized=np.ones(3, dtype=np.bool_),
-        threshold=np.float32(1.0),
-    )
-    assert self_contact_penalty(None, force, params) == 0
-    # External contacts cannot become self-contact penalties.
-    assert np.linalg.norm(backend._model.get_link_net_contact_forces(backend._data)[0, 1, :3]) > 1
-    positions = backend.compile_writes({"p": BodyPositionWrite(("a", "b", "c", "object"))}, reset=True)
-    positions.buffer("p")[0] = [[-0.15, 0, 0], [0, 0, 0], [0, 0.15, 0], [4, 0, 0]]
-    positions.execute()
-    backend.step(1)
-    reads.execute()
-    # Perpendicular contacts have different bases. Their normal components
-    # must not cancel when summed as world-space forces on the middle body.
-    assert self_contact_penalty(None, reads["force"][0], params) == 3
-
-
 @pytest.fixture(scope="module")
 def paper_env():
     cfg = registry.make_env_config("g1-29dof-wbt-largebox-omniretarget")
@@ -163,7 +110,6 @@ def test_physical_randomization_survives_partial_and_clip_resets(paper_env):
     assert np.all((factor >= 0.7) & (factor <= 1.3))
     com = np.array(link.get_center_of_mass_override(data))
     assert np.all(np.abs(com) <= env.cfg.randomization.object_com)
-    bias = env.action_terms["joint_position"].state.bias.copy()
     torso = np.array(model.get_link("torso_link").get_center_of_mass_override(data))
     # A partial episode reset plus an independent clip rematerialization.
     env.reset(np.array([1, 4], dtype=np.int64), np.array([3], dtype=np.int64))
@@ -171,25 +117,48 @@ def test_physical_randomization_survives_partial_and_clip_resets(paper_env):
     np.testing.assert_array_equal(np.array(link.get_inertia_override(data)), inertia)
     np.testing.assert_array_equal(np.array(link.get_center_of_mass_override(data)), com)
     retained = [0, 2, 3, 5, 6, 7]
-    np.testing.assert_array_equal(env.action_terms["joint_position"].state.bias[retained], bias[retained])
-    assert np.all(np.any(env.action_terms["joint_position"].state.bias[[1, 4]] != bias[[1, 4]], axis=1))
+    np.testing.assert_array_equal(env.action_terms["joint_position"].state.bias, 0.0)
     updated_torso = np.array(model.get_link("torso_link").get_center_of_mass_override(data))
     np.testing.assert_array_equal(updated_torso[retained], torso[retained])
     assert np.all(np.any(updated_torso[[1, 4]] != torso[[1, 4]], axis=1))
-    assert np.all(np.isneginf(env.action_space.low))
-    assert np.all(np.isposinf(env.action_space.high))
+    # FastSAC uses the resolved per-joint finite policy bounds.
+    assert np.all(np.isfinite(env.action_space.low))
+    assert np.all(np.isfinite(env.action_space.high))
+    assert np.all(env.action_space.low < 0)
+    assert np.all(env.action_space.high > 0)
 
 
 @pytest.mark.numba
-def test_privileged_state_and_curriculum_latch_are_independent_of_object_error(paper_env):
-    env = paper_env
+@pytest.mark.parametrize("curriculum_enabled,evaluation", [(False, False), (True, False), (True, True)])
+def test_object_termination_activation_and_optional_curriculum_latch(curriculum_enabled, evaluation):
+    cfg = registry.make_env_config("g1-29dof-wbt-largebox-omniretarget")
+    cfg.object_curriculum.enabled = curriculum_enabled
+    cfg.evaluation = evaluation
+    env = OmniRetargetEnv(cfg, num_envs=2, seed=97)
+    env.init_state()
     policy = {term.name for term in env.observation_groups["policy"].terms}
     value = {term.name for term in env.observation_groups["value"].terms}
-    assert {"motion_ref_pos_b", "base_lin_vel"} <= policy
+    assert {"motion_ref_pos_b", "base_lin_vel"}.isdisjoint(policy)
+    assert {"motion_ref_pos_b", "base_lin_vel"} <= value
     assert {"obj_pos_b", "obj_ori_b", "obj_lin_vel_b"} <= value
     assert {"obj_pos_b", "obj_ori_b", "obj_lin_vel_b"}.isdisjoint(policy)
     gate = env._gate
-    gate.enabled[0] = False
+    initially_active = evaluation or not curriculum_enabled
+    assert bool(gate.enabled[0]) == initially_active
+    # A failed object must terminate immediately unless training explicitly
+    # requests the delayed curriculum; evaluation always checks object failure.
+    env._refresh_sim_reads()
+    writer = env.sim.compile_writes({"p": BodyPositionWrite(("baseLink",))})
+    writer.buffer("p")[0, 0] = env.sim_data["object_pos"][0] + [4, 0, 0]
+    writer.execute(np.array([0], dtype=np.int64))
+    env._refresh_sim_reads()
+    env._execute_evaluate_kernel(env._kernel_inputs)
+    assert bool(env.state.metrics["object_tracking"][0]) == initially_active
+    env.reset(np.arange(env.num_envs, dtype=np.int64))
+    if initially_active:
+        assert gate.enabled[0]
+        assert env._average_episode_steps == 0
+        return
     # Use a short test horizon gate; only real completed episodes count.
     env.cfg.object_curriculum.episode_window = 2
     env.cfg.object_curriculum.enable_at_horizon_fraction = 0.5
@@ -209,7 +178,6 @@ def test_privileged_state_and_curriculum_latch_are_independent_of_object_error(p
     env.state.truncated[:] = False
     # Move the actual object without moving its reference; active gate sees it.
     env._refresh_sim_reads()
-    writer = env.sim.compile_writes({"p": BodyPositionWrite(("baseLink",))})
     writer.buffer("p")[0, 0] = env.sim_data["object_pos"][0] + [4, 0, 0]
     writer.execute(np.array([0], dtype=np.int64))
     env._refresh_sim_reads()
