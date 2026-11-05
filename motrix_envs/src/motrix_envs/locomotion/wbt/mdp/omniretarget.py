@@ -240,3 +240,29 @@ class StagedObjectTerminationCfg(TerminationTermCfg):
             np.float32(self.angle),
             metric_names=("object_position_error", "object_orientation_error", "object_termination_enabled"),
         )
+
+
+@dispatch
+def ankle_target_margin_reward(ctx: ManagerContext, indices: tuple[int, ...], margin: np.float32) -> float:
+    action = ctx.actions["joint_position"]
+    raw = action.current()
+    penalty = 0.0
+    for index in indices:
+        midpoint = (action.joint_lower[index] + action.joint_upper[index]) * 0.5
+        half_range = (action.joint_upper[index] - action.joint_lower[index]) * 0.5
+        target = action.default_angles[index] + raw[index] * action.action_scales[index] + action.bias[index]
+        excess = max(abs((target - midpoint) / half_range) - margin, 0.0)
+        penalty += excess * excess
+    return penalty
+
+
+@configclass(kw_only=True)
+class AnkleTargetMarginRewardCfg(RewardTermCfg):
+    """Penalize normalized pre-clip roll targets outside the soft margin."""
+
+    margin: float = 0.9
+
+    def __call__(self, ctx) -> RewardTerm:
+        names = tuple(actuator.target_name for actuator in ctx.model.actuators)
+        indices = tuple(names.index(side + "_ankle_roll_joint") for side in ("left", "right"))
+        return RewardTerm(ankle_target_margin_reward, indices, np.float32(self.margin))

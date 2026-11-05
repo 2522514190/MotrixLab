@@ -72,6 +72,7 @@ from motrix_envs.locomotion.wbt.mdp.observations import (
     RobotBodyPositionInReferenceFrameObsCfg,
 )
 from motrix_envs.locomotion.wbt.mdp.omniretarget import (
+    AnkleTargetMarginRewardCfg,
     BodyRot6dObsCfg,
     CalibratedActionCfg,
     CalibratedPositionObsCfg,
@@ -119,6 +120,7 @@ class OmniRewardsCfg(ManagerRewardsCfg):
     motion_global_body_ang_vel: GlobalBodyAngularVelocityRewardCfg = GlobalBodyAngularVelocityRewardCfg(
         weight=1.0, sigma=3.14
     )
+    ankle_target_margin: AnkleTargetMarginRewardCfg = AnkleTargetMarginRewardCfg(weight=-1.0)
     action_rate_l2: ActionRateRewardCfg = ActionRateRewardCfg(weight=-0.1)
     limits_dof_pos: DofLimitRewardCfg = DofLimitRewardCfg(weight=-10.0, soft_limit=0.9, cap=5.0)
     undesired_contacts: UndesiredContactsRewardCfg = UndesiredContactsRewardCfg(weight=-0.1, threshold=1.0)
