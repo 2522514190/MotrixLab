@@ -205,6 +205,7 @@ class OmniRandomizationCfg:
     enabled: bool = True
     # Keep the box physical domain randomization moderate while retaining the
     # nominal pose and the ability to learn contact robustness.
+    foot_friction_scale: tuple[float, float] = (0.8, 1.2)
     object_mass: tuple[float, float] = (0.1, 0.5)
     object_com: tuple[float, float, float] = (0.02, 0.02, 0.02)
     object_inertia_scale: tuple[float, float] = (0.8, 1.2)
@@ -278,6 +279,8 @@ class OmniRetargetEnvCfg(G1WbtEnvCfg):
             root_ang_vel=LinkAngularVelocityQuery(link="pelvis"),
         )
         self.queries.model["torso_com"] = LinkCenterOfMassQuery(name="torso_link")
+        for name in ("floor",) + tuple(f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)):
+            self.queries.model["contact_friction_" + name] = GeomFrictionQuery(name=name)
         self.queries.model["box_friction"] = GeomFrictionQuery(name="largebox_collision")
 
     def for_play(self):
@@ -329,6 +332,18 @@ class OmniRetargetEnv(ManagerEnv):
             },
             reset=False,
         )
+        contact_names = ("floor",) + tuple(
+            f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
+        )
+        self._contact_writes = self.sim.compile_writes(
+            {"friction": GeomFrictionWrite(contact_names)}, reset=False
+        )
+        contact_friction = self._contact_writes.buffer("friction")
+        for index, name in enumerate(contact_names):
+            contact_friction[:, index] = self.model.others["contact_friction_" + name]
+        if cfg.randomization.enabled:
+            scales = self._dr_rng.uniform(*cfg.randomization.foot_friction_scale, size=num_envs)
+            contact_friction[:, :, 0] *= scales[:, None]
         self._push_writes = self.sim.compile_writes(
             {
                 "linear": BodyLinearVelocityWrite(("pelvis",)),
@@ -391,6 +406,7 @@ class OmniRetargetEnv(ManagerEnv):
             # Native reset restores overrides; reapply physical parameters to
             # reset lanes, including motion-clip boundaries.
             self._domain_writes.execute(selected)
+            self._contact_writes.execute(selected)
         if env_ids.size:
             self._elapsed_since_reset[env_ids] = 0
             self._push_remaining[env_ids] = self._dr_rng.uniform(
