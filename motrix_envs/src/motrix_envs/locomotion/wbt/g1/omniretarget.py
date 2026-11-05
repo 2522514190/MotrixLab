@@ -119,7 +119,7 @@ class OmniRewardsCfg(ManagerRewardsCfg):
     motion_global_body_ang_vel: GlobalBodyAngularVelocityRewardCfg = GlobalBodyAngularVelocityRewardCfg(
         weight=1.0, sigma=3.14
     )
-    action_rate_l2: ActionRateRewardCfg = ActionRateRewardCfg(weight=-0.1)
+    action_rate_l2: ActionRateRewardCfg = ActionRateRewardCfg(weight=-0.5)
     limits_dof_pos: DofLimitRewardCfg = DofLimitRewardCfg(weight=-10.0, soft_limit=0.9, cap=5.0)
     undesired_contacts: UndesiredContactsRewardCfg = UndesiredContactsRewardCfg(weight=-0.1, threshold=1.0)
     object_global_ref_position_error_exp: ObjectPositionRewardCfg = ObjectPositionRewardCfg(weight=1.0, sigma=0.3)
