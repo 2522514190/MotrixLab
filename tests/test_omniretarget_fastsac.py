@@ -109,6 +109,16 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
         env.step(np.zeros((env.num_envs, env.action_space.shape[0]), dtype=np.float32))
         np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.2, atol=1e-6)
         assert env.state.metrics["box_reward_weight"] == pytest.approx(0.2)
+        # Re-evaluate with the new weights; compare the compiled kernel's
+        # weighted term against the raw term, not just the cfg value.
+        env._refresh_sim_reads()
+        env._execute_evaluate_kernel(env._kernel_inputs)
+        for index in indices:
+            np.testing.assert_allclose(
+                env._kernel_buffers[1][:, index],
+                env._kernel_buffers[0][:, index] * 0.2 * env.cfg.ctrl_dt,
+                atol=1e-6,
+            )
     finally:
         env.close()
 
