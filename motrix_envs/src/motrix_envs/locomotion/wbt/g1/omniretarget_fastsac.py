@@ -20,7 +20,15 @@ def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
 
     zh_CN: 复用 PPO 搬箱配置，仅由任务运行时提供 FastSAC 的有限策略动作边界。
     """
-    return make_omniretarget_cfg()
+    cfg = make_omniretarget_cfg()
+    # Preserve adaptive motion sampling; reserve 30% of resets for complete
+    # pick-carry-place attempts. Remaining starts keep the adaptive sampler.
+    cfg.commands.motion.start_at_timestep_zero_prob = 0.3
+    cfg.object_curriculum.from_zero_only = True
+    cfg.randomize_initial_episode_progress = False
+    cfg.rewards.object_global_ref_position_error_exp.weight = 0.5
+    cfg.rewards.object_global_ref_orientation_error_exp.weight = 0.5
+    return cfg
 
 
 @registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac")
