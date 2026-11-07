@@ -47,6 +47,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         self._box_decay_elapsed = 0
         self._box_weight_indices = None
         self._box_success_bonus = np.zeros(num_envs, dtype=np.float32)
+        self._box_success_mask = np.zeros(num_envs, dtype=bool)
         self._box_success_counted = np.zeros(num_envs, dtype=bool)
         self._box_stable_steps = np.zeros(num_envs, dtype=np.int32)
         self._box_was_lifted = np.zeros(num_envs, dtype=bool)
@@ -64,10 +65,10 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         self._task_program.reward_weights[list(self._box_weight_indices)] = 0.5
         # Observable through FastSAC reward-term and metric logs.
         state.reward_terms["box_success_bonus"] = self._box_success_bonus
-        state.metrics["box_success"] = self._box_success_bonus / np.float32(5.0)
+        state.metrics["box_success"] = self._box_success_mask
         state.metrics["box_reward_weight"] = 0.5
         state.metrics["box_success_total"] = 0.0
-        state.metrics["box_full_start_fraction"] = self._started_from_zero.astype(np.float32)
+        state.metrics["box_full_start_fraction"] = self._started_from_zero
         return state
 
     def reset(self, env_ids, sim_reset_ids=None):
@@ -81,9 +82,10 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
     def compute_transition(self, state):
         state = super().compute_transition(state)
         self._box_success_bonus.fill(0.0)
+        self._box_success_mask.fill(False)
         motion = self.command_terms["motion"]
-        object_pos = self.sim_data["object_pos"]
-        object_quat = self.sim_data["object_quat"]
+        object_pos = self._compiled_manager_program.read_plan.sim_data.view("object_pos")
+        object_quat = self._compiled_manager_program.read_plan.sim_data.view("object_quat")
         reference_pos = motion.clip.extensions["object_pos_w"].data
         reference_quat = motion.clip.extensions["object_quat_w"].data
         self._box_was_lifted |= (
@@ -99,8 +101,8 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
             np.linalg.norm(object_quat, axis=1) * np.linalg.norm(reference_quat[-1]), 1e-8
         )
         ori_error = 2.0 * np.arccos(np.clip(np.abs(quat_dot) / quat_den, 0.0, 1.0))
-        lin_speed = np.linalg.norm(self.sim_data["object_lin_vel"], axis=1)
-        ang_speed = np.linalg.norm(self.sim_data["object_ang_vel"], axis=1)
+        lin_speed = np.linalg.norm(self._compiled_manager_program.read_plan.sim_data.view("object_lin_vel"), axis=1)
+        ang_speed = np.linalg.norm(self._compiled_manager_program.read_plan.sim_data.view("object_ang_vel"), axis=1)
         # Ten consecutive 50-Hz frames verify 0.2 s of stable placement.
         in_final_window = (
             self._started_from_zero
@@ -128,6 +130,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
             & (self._box_stable_steps >= 10) & ~state.terminated
         )
         self._box_success_bonus[success] = 5.0
+        self._box_success_mask[success] = True
         self._box_success_counted[reached_end] = True
         self._box_success_total += int(np.count_nonzero(success))
         state.reward[:] += self._box_success_bonus
