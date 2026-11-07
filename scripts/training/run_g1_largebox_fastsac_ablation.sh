@@ -24,11 +24,12 @@ for i in "${!groups[@]}"; do
   start=$(date -Is); before=$(find_latest_run || true)
   printf '[%s] START %s env=%s contact=%s box_error_termination=%s adaptive_sampling=%s\n' "$start" "$group" "$env_name" "${contacts[$i]}" "${box_terms[$i]}" "${adaptive[$i]}" | tee -a "$TOTAL_LOG" "$group_dir/run.log"
   printf 'commit=%s\nseed=1\nnum_learning_iterations=40000\ncontact_penalty=%s\nbox_error_termination=%s\nadaptive_sampling=%s\ncurriculum=full-start-survival-ema/reference_frames=325\n' "$COMMIT" "${contacts[$i]}" "${box_terms[$i]}" "${adaptive[$i]}" > "$group_dir/experiment.txt"
-  set +e
   mxlab train task=g1-29dof-wbt-largebox-omniretarget-fastsac/motrix.fastsac task.env="$env_name" seed=1 algo.trainer.num_learning_iterations=40000 2>&1 | tee -a "$group_dir/train.log" "$TOTAL_LOG"
-  rc=${PIPESTATUS[0]}; set -e
-  end=$(date -Is); after=$(find_latest_run || true); run_dir="$after"; [[ "$after" == "$before" ]] && run_dir=""
-  status=failed; [[ $rc -eq 0 ]] && status=completed
+  rc=${PIPESTATUS[0]}
+  end=$(date -Is); after=$(find_latest_run || true); run_dir="$after"
+  if [[ "$after" == "$before" ]]; then run_dir=""; fi
+  status=failed
+  if [[ $rc -eq 0 ]]; then status=completed; fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$group" "${contacts[$i]}" "${box_terms[$i]}" "${adaptive[$i]}" 40000 "$status" "$start" "$end" "$run_dir" >> "$SUMMARY"
   printf '[%s] END %s status=%s rc=%s run_dir=%s\n' "$end" "$group" "$status" "$rc" "$run_dir" | tee -a "$TOTAL_LOG" "$group_dir/run.log"
   printf 'start=%s\nend=%s\nexit_status=%s\nrun_dir=%s\n' "$start" "$end" "$rc" "$run_dir" >> "$group_dir/experiment.txt"
