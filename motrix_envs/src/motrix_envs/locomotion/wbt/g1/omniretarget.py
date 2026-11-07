@@ -377,7 +377,12 @@ class OmniRetargetEnv(ManagerEnv):
                 weight = min(finished.size / self.cfg.object_curriculum.episode_window, 1.0)
                 mean = float(np.mean(self._elapsed_since_reset[finished]))
                 self._average_episode_steps = (1.0 - weight) * self._average_episode_steps + weight * mean
-                threshold = self.cfg.object_curriculum.enable_at_horizon_fraction * self.cfg.max_episode_steps
+                horizon = (
+                    self.command_terms["motion"].clip.joint_pos.shape[0]
+                    if self.cfg.object_curriculum.from_zero_only
+                    else self.cfg.max_episode_steps
+                )
+                threshold = self.cfg.object_curriculum.enable_at_horizon_fraction * horizon
                 self._gate.enabled[0] |= self._average_episode_steps >= threshold
         super().reset(env_ids, sim_reset_ids)
         if env_ids.size:
