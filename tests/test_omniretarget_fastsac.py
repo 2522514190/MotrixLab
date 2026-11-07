@@ -116,9 +116,10 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
 @pytest.mark.numba
 def test_full_start_sample_and_live_reward_metrics():
     spec = registry.resolve("g1-29dof-wbt-largebox-omniretarget-fastsac")
-    cfg = spec.make_env_config()
+    cfg = registry.make_env_config("g1-29dof-wbt-largebox-omniretarget-fastsac")
     cfg.commands.motion.start_at_timestep_zero_prob = 1.0
-    env = spec.make(num_envs=2, seed=29, cfg=cfg)
+    from motrix_envs.locomotion.wbt.g1.omniretarget_fastsac import OmniRetargetFastSacEnv
+    env = OmniRetargetFastSacEnv(cfg, num_envs=2, seed=29)
     try:
         env.init_state()
         assert env._started_from_zero.all()
