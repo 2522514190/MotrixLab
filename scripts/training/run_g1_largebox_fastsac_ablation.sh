@@ -2,6 +2,8 @@
 set -u -o pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
+# Keep the batch runner independent of the parent shell activation.
+export PATH="$ROOT/.venv/bin:$PATH"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export PYTHONUNBUFFERED=1
 STAMP=$(date +%Y%m%d-%H%M%S)
