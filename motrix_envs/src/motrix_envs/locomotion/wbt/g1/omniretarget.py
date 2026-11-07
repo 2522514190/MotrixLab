@@ -232,6 +232,10 @@ class ObjectCurriculumCfg:
     enable_at_horizon_fraction: float = 0.8
     # For the FastSAC carrying experiment, gate on genuinely full-start episodes only.
     from_zero_only: bool = False
+    # Reference-frame denominator used by full-start survival curriculum.
+    reference_frames: int = 325
+    # Whether delayed object tracking failure termination is active.
+    error_termination_enabled: bool = True
 
 
 @configclass
@@ -323,7 +327,10 @@ class OmniRetargetEnv(ManagerEnv):
         self._elapsed_since_reset = np.zeros(num_envs, dtype=np.int64)
         self._started_from_zero = np.zeros(num_envs, dtype=bool)
         self._gate = self.termination_manager.terms["object_tracking"].args[0]
-        self._gate.enabled[0] = cfg.evaluation or not cfg.object_curriculum.enabled
+        self._gate.enabled[0] = (
+            cfg.evaluation
+            or (cfg.object_curriculum.error_termination_enabled and not cfg.object_curriculum.enabled)
+        )
         self._domain_writes = self.sim.compile_writes(
             {
                 "mass": LinkMassWrite(("baseLink",)),
@@ -366,6 +373,9 @@ class OmniRetargetEnv(ManagerEnv):
             state.episode_steps[:] = self._dr_rng.integers(self.cfg.max_episode_steps, size=self.num_envs)
         return state
 
+    def _on_full_start_episodes_finished(self, env_ids):
+        """Hook for task-specific full-start episode statistics."""
+
     def reset(self, env_ids, sim_reset_ids=None):
         # Update the Holosoma-style episode-length EMA only for actual episode
         # endings. Clip rematerialization and explicit resets cannot unlock it.
@@ -374,16 +384,18 @@ class OmniRetargetEnv(ManagerEnv):
             if self.cfg.object_curriculum.from_zero_only:
                 finished = finished[self._started_from_zero[finished]]
             if finished.size:
-                weight = min(finished.size / self.cfg.object_curriculum.episode_window, 1.0)
-                mean = float(np.mean(self._elapsed_since_reset[finished]))
-                self._average_episode_steps = (1.0 - weight) * self._average_episode_steps + weight * mean
-                horizon = (
-                    self.command_terms["motion"].clip.joint_pos.shape[0]
-                    if self.cfg.object_curriculum.from_zero_only
-                    else self.cfg.max_episode_steps
-                )
-                threshold = self.cfg.object_curriculum.enable_at_horizon_fraction * horizon
-                self._gate.enabled[0] |= self._average_episode_steps >= threshold
+                if self.cfg.object_curriculum.error_termination_enabled:
+                    weight = min(finished.size / self.cfg.object_curriculum.episode_window, 1.0)
+                    mean = float(np.mean(self._elapsed_since_reset[finished]))
+                    self._average_episode_steps = (1.0 - weight) * self._average_episode_steps + weight * mean
+                    horizon = (
+                        self.command_terms["motion"].clip.joint_pos.shape[0]
+                        if self.cfg.object_curriculum.from_zero_only
+                        else self.cfg.max_episode_steps
+                    )
+                    threshold = self.cfg.object_curriculum.enable_at_horizon_fraction * horizon
+                    self._gate.enabled[0] |= self._average_episode_steps >= threshold
+                self._on_full_start_episodes_finished(finished)
         super().reset(env_ids, sim_reset_ids)
         if env_ids.size:
             # Motion reset_env has sampled the reference phase by now.

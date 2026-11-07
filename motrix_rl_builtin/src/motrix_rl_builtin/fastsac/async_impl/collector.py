@@ -105,6 +105,8 @@ class Collector:
         self.weights = weights
         self.control = control
         self.collector_id = collector_id
+        if hasattr(env.env, "set_curriculum_state"):
+            env.env.set_curriculum_state(control.box_curriculum.numpy(), collector_id)
         self.is_resume = is_resume
         # Env-internal step profiling (Perf on the wrapped env, when present)
         # feeds the panel's env_step sub-stage tree. ``env.env`` is the
@@ -265,6 +267,8 @@ class Collector:
         t_sample = time.perf_counter()
         actions = self._sample_actions(warming)
         t_env = time.perf_counter()
+        if hasattr(self.env.env, "set_training_iteration"):
+            self.env.env.set_training_iteration(steps)
         result = self.env.step(actions)
         t_payload = time.perf_counter()
         final_payload = None

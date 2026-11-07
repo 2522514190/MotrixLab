@@ -75,6 +75,15 @@ class Control:
         self._global_step = _shared((1,), torch.int64)  # learner iteration counter
         # one env-step-batch counter per collector, single-writer each
         self._collector_steps = [_shared((1,), torch.int64) for _ in range(num_collectors)]
+        # Per-collector full-start survival EMA, valid flag, and synchronized
+        # non-increasing box reward weight.
+        self._box_curriculum = _shared((num_collectors, 3), torch.float64)
+        self._box_curriculum[:, 2] = 0.5
+
+    @property
+    def box_curriculum(self):
+        """Shared CPU tensor used to synchronize collector curriculum state."""
+        return self._box_curriculum
 
     @property
     def stop(self) -> bool:

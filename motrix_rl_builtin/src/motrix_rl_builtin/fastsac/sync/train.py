@@ -262,6 +262,8 @@ class Trainer(TrainerBase):
                 else:
                     actions = agent.act(obs, deterministic=False)
 
+                if hasattr(env.env, "set_training_iteration"):
+                    env.env.set_training_iteration(agent.global_step)
                 result = env.step(actions)
                 next_obs, next_critic_obs = result.obs, result.critic_obs
                 rewards, terminated, truncated = result.reward, result.terminated, result.truncated

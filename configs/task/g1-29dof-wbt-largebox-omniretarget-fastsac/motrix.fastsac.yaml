@@ -23,8 +23,6 @@ algo:
     target_entropy_ratio: 0.5
     num_atoms: 501
   trainer:
-    # Match 4096 * 400000 Holosoma interactions; this does not equate updates
-    # or learning progress. 192000 iterations match PPO's 4000-iteration data.
-    num_learning_iterations: 800000
+    num_learning_iterations: 40000
     async_options:
       utd_mode: strict

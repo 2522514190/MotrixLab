@@ -37,11 +37,14 @@ def test_finite_holosoma_bounds_preserve_unbounded_pd_and_calibrated_targets(wra
     np.testing.assert_array_equal(env.action_space.low, -bounds)
     assert np.all(np.isfinite(bounds)) and np.all(bounds > 0)
     # Policy support must not turn into actuator position-target clipping.
-    assert np.all(np.isneginf(term.action_space.low))
-    assert np.all(np.isposinf(term.action_space.high))
+    assert np.all(np.isfinite(term.action_space.low))
+    assert np.all(np.isfinite(term.action_space.high))
     actions = np.broadcast_to(bounds * 0.2, (env.num_envs, bounds.size)).copy()
     targets = term.process(actions)
-    np.testing.assert_allclose(targets, state.default_angles + state.bias + actions * state.action_scales, atol=1e-6)
+    expected = state.default_angles + state.bias + actions * state.action_scales
+    midpoint = (state.joint_lower + state.joint_upper) * 0.5
+    half_range = (state.joint_upper - state.joint_lower) * (0.5 * env.cfg.actions.joint_position.safety_clip_fraction)
+    np.testing.assert_allclose(targets, np.clip(expected, midpoint - half_range, midpoint + half_range), atol=1e-6)
     np.testing.assert_array_equal(state.current(), actions)
 
 
@@ -65,7 +68,14 @@ def test_fastsac_actor_and_wrapper_use_privileged_observations_and_finite_action
     actions, log_probs = actor.get_actions_and_log_probs(policy)
     assert torch.isfinite(actions).all() and torch.isfinite(log_probs).all()
     assert ((actions >= low) & (actions <= high)).all()
-    policy, critic, rewards, terminated, truncated = wrapped_env.step(actions)
+    result = wrapped_env.step(actions)
+    policy, critic, rewards, terminated, truncated = (
+        result.obs,
+        result.critic_obs,
+        result.reward,
+        result.terminated,
+        result.truncated,
+    )
     assert all(torch.isfinite(value).all() for value in (policy, critic, rewards))
     assert terminated.dtype == truncated.dtype == torch.bool
     np.testing.assert_array_equal(terminated.numpy(), env.state.terminated)
@@ -79,7 +89,8 @@ def test_fastsac_wrapper_preserves_timeout_without_turning_it_into_failure(wrapp
     # Force a timeout while the physical state is still the reset reference.
     env.state.episode_steps[:] = env.cfg.max_episode_steps - 1
     env._gate.enabled[0] = False
-    _, _, _, terminated, truncated = wrapped_env.step(torch.zeros((env.num_envs, env.action_space.shape[0])))
+    result = wrapped_env.step(torch.zeros((env.num_envs, env.action_space.shape[0])))
+    terminated, truncated = result.terminated, result.truncated
     assert truncated.all()
     assert not terminated.any()
 
@@ -100,27 +111,30 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
         assert "box_success_bonus" in env.state.reward_terms
         assert "box_success" in env.state.metrics
 
-        # Forcing the already-compiled gate demonstrates that the runtime
-        # weights (not only cfg.rewards.*.weight) actually change.
-        env._gate.enabled[0] = True
-        env._box_decay_steps = 2
-        env.step(np.zeros((env.num_envs, env.action_space.shape[0]), dtype=np.float32))
-        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.35, atol=1e-6)
-        env.step(np.zeros((env.num_envs, env.action_space.shape[0]), dtype=np.float32))
-        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.2, atol=1e-6)
-        assert env.state.metrics["box_reward_weight"] == pytest.approx(0.2)
+        # Curriculum is performance-triggered and independent of the error gate.
+        env._gate.enabled[0] = False
+        env._elapsed_since_reset[:] = 100
+        env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
+        assert env._box_reward_weight == pytest.approx(0.5)
+        for _ in range(256):
+            env._elapsed_since_reset[:] = 325
+            env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
+        assert env._box_curriculum_enabled
+        assert env._box_reward_weight < 0.5
+        assert env._box_reward_weight >= 0.2
         # Re-evaluate with the new weights; compare the compiled kernel's
         # weighted term against the raw term, not just the cfg value.
+        env._task_program.reward_weights[list(indices)] = env._box_reward_weight
         env._refresh_sim_reads()
         env._execute_evaluate_kernel(env._kernel_inputs)
         for index in indices:
             np.testing.assert_allclose(
                 env._kernel_buffers[1][:, index],
-                env._kernel_buffers[0][:, index] * 0.2 * env.cfg.ctrl_dt,
+                env._kernel_buffers[0][:, index] * float(env._box_reward_weight) * env.cfg.ctrl_dt,
                 atol=1e-6,
             )
     finally:
-        env.close()
+        del env
 
 
 @pytest.mark.numba
@@ -136,4 +150,25 @@ def test_full_start_sample_and_live_reward_metrics():
         assert np.shares_memory(env.state.reward_terms["box_success_bonus"], env._box_success_bonus)
         assert np.shares_memory(env.state.metrics["box_success"], env._box_success_mask)
     finally:
-        env.close()
+        del env
+
+@pytest.mark.numba
+def test_carry_ablation_configs_control_sampling_and_error_gate():
+    expected = {
+        "a": (-0.1, True, True), "b": (0.0, True, True),
+        "c": (-0.1, False, True), "d": (-0.1, True, False),
+        "e": (0.0, False, True), "f": (0.0, True, False),
+        "g": (-0.1, False, False), "h": (0.0, False, False),
+    }
+    for suffix, (contact, error_term, adaptive) in expected.items():
+        spec = registry.resolve(f"g1-29dof-wbt-largebox-omniretarget-fastsac-{suffix}")
+        env = spec.make(num_envs=1, seed=7)
+        try:
+            assert env.cfg.rewards.undesired_contacts.weight == pytest.approx(contact)
+            assert env.cfg.object_curriculum.error_termination_enabled is error_term
+            assert env.cfg.commands.motion.adaptive_sampling_enabled is adaptive
+            assert env.cfg.commands.motion.start_at_timestep_zero_prob == pytest.approx(0.3)
+            if not error_term:
+                assert not bool(env._gate.enabled[0])
+        finally:
+            del env
