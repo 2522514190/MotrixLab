@@ -82,3 +82,47 @@ def test_fastsac_wrapper_preserves_timeout_without_turning_it_into_failure(wrapp
     _, _, _, terminated, truncated = wrapped_env.step(torch.zeros((env.num_envs, env.action_space.shape[0])))
     assert truncated.all()
     assert not terminated.any()
+
+
+@pytest.mark.numba
+def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weights():
+    spec = registry.resolve("g1-29dof-wbt-largebox-omniretarget-fastsac")
+    env = spec.make(num_envs=2, seed=17)
+    try:
+        env.init_state()
+        assert env.cfg.commands.motion.adaptive_sampling_enabled
+        assert env.cfg.commands.motion.start_at_timestep_zero_prob == pytest.approx(0.3)
+        assert env.cfg.object_curriculum.from_zero_only
+        assert not env.cfg.randomize_initial_episode_progress
+        assert not env._gate.enabled[0]
+        indices = env._box_weight_indices
+        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.5)
+        assert "box_success_bonus" in env.state.reward_terms
+        assert "box_success" in env.state.metrics
+
+        # Forcing the already-compiled gate demonstrates that the runtime
+        # weights (not only cfg.rewards.*.weight) actually change.
+        env._gate.enabled[0] = True
+        env._box_decay_steps = 2
+        env.step(np.zeros((env.num_envs, env.action_space.shape[0]), dtype=np.float32))
+        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.35, atol=1e-6)
+        env.step(np.zeros((env.num_envs, env.action_space.shape[0]), dtype=np.float32))
+        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.2, atol=1e-6)
+        assert env.state.metrics["box_reward_weight"] == pytest.approx(0.2)
+    finally:
+        env.close()
+
+
+@pytest.mark.numba
+def test_full_start_sample_and_live_reward_metrics():
+    spec = registry.resolve("g1-29dof-wbt-largebox-omniretarget-fastsac")
+    cfg = spec.make_env_config()
+    cfg.commands.motion.start_at_timestep_zero_prob = 1.0
+    env = spec.make(num_envs=2, seed=29, cfg=cfg)
+    try:
+        env.init_state()
+        assert env._started_from_zero.all()
+        assert np.shares_memory(env.state.reward_terms["box_success_bonus"], env._box_success_bonus)
+        assert np.shares_memory(env.state.metrics["box_success"], env._box_success_mask)
+    finally:
+        env.close()
