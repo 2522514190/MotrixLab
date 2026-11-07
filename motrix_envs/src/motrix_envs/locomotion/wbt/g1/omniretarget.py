@@ -230,6 +230,8 @@ class ObjectCurriculumCfg:
     # of 80% horizon before latching object termination on.
     episode_window: int = 1000
     enable_at_horizon_fraction: float = 0.8
+    # For the FastSAC carrying experiment, gate on genuinely full-start episodes only.
+    from_zero_only: bool = False
 
 
 @configclass
@@ -319,6 +321,7 @@ class OmniRetargetEnv(ManagerEnv):
         self._dr_rng = np.random.default_rng(seed)
         self._average_episode_steps = 0.0
         self._elapsed_since_reset = np.zeros(num_envs, dtype=np.int64)
+        self._started_from_zero = np.zeros(num_envs, dtype=bool)
         self._gate = self.termination_manager.terms["object_tracking"].args[0]
         self._gate.enabled[0] = cfg.evaluation or not cfg.object_curriculum.enabled
         self._domain_writes = self.sim.compile_writes(
@@ -368,6 +371,8 @@ class OmniRetargetEnv(ManagerEnv):
         # endings. Clip rematerialization and explicit resets cannot unlock it.
         if env_ids.size and self._state is not None and self.cfg.object_curriculum.enabled and not self.cfg.evaluation:
             finished = env_ids[self._state.done[env_ids]]
+            if self.cfg.object_curriculum.from_zero_only:
+                finished = finished[self._started_from_zero[finished]]
             if finished.size:
                 weight = min(finished.size / self.cfg.object_curriculum.episode_window, 1.0)
                 mean = float(np.mean(self._elapsed_since_reset[finished]))
@@ -375,6 +380,9 @@ class OmniRetargetEnv(ManagerEnv):
                 threshold = self.cfg.object_curriculum.enable_at_horizon_fraction * self.cfg.max_episode_steps
                 self._gate.enabled[0] |= self._average_episode_steps >= threshold
         super().reset(env_ids, sim_reset_ids)
+        if env_ids.size:
+            # Motion reset_env has sampled the reference phase by now.
+            self._started_from_zero[env_ids] = self.command_terms["motion"].steps[env_ids, 0] == 0
         if env_ids.size and self.cfg.randomization.enabled:
             # BM S1 specifies fresh robot calibration / COM draws per episode.
             # Clip rematerialization keeps the episode's robot parameters.
