@@ -179,8 +179,12 @@ def test_carry_ablation_configs_control_sampling_and_error_gate():
 
 
 @pytest.mark.numba
-def test_unilab_bonus_is_ten_and_ablation_config_is_unchanged():
-    """Regression guard: A-H retain their switches and full-clip end bonus is +10."""
+def test_unilab_full_start_bonus_is_ten_once_and_not_dt_scaled():
+    """Test host-side success injection while keeping unrelated termination checks isolated."""
+    from unittest.mock import patch
+
+    from motrix_env_core.sim.write import BodyPositionWrite, BodyRotationWrite
+    from motrix_envs.locomotion.wbt.g1.omniretarget import OmniRetargetEnv
     from motrix_envs.locomotion.wbt.g1.omniretarget_fastsac import OmniRetargetFastSacEnv
 
     cfg = registry.make_env_config("g1-29dof-wbt-largebox-omniretarget-fastsac-a")
@@ -189,29 +193,39 @@ def test_unilab_bonus_is_ten_and_ablation_config_is_unchanged():
     try:
         env.init_state()
         assert env._started_from_zero[0]
-        # Force the motion clock to its final reference step and position the
-        # real object at the reference final pose through backend sim writes.
-        # The runtime reward must be +10, not +10 * ctrl_dt.
-        from motrix_env_core.sim.write import BodyPositionWrite, BodyRotationWrite
-
         motion = env.command_terms["motion"]
-        motion.steps[0, 0] = motion.clip.joint_pos.shape[0] - 1
-        final_pos = motion.clip.extensions["object_pos_w"].data[-1]
-        final_quat = motion.clip.extensions["object_quat_w"].data[-1]
+        assert motion.clip.joint_pos.shape[0] == 725
+
+        # Place the physical box at the target final pose.
         writes = env.sim.compile_writes(
             {"p": BodyPositionWrite(("baseLink",)), "q": BodyRotationWrite(("baseLink",))}
         )
-        writes.buffer("p")[0, 0] = final_pos
-        writes.buffer("q")[0, 0] = final_quat
+        writes.buffer("p")[0, 0] = motion.clip.extensions["object_pos_w"].data[-1]
+        writes.buffer("q")[0, 0] = motion.clip.extensions["object_quat_w"].data[-1]
         writes.execute(np.array([0], dtype=np.int64))
         env._refresh_sim_reads()
-        # The step transition increments the reference index and sets clip_ended.
-        # Avoid physics/action perturbing the deliberately constructed end pose.
-        env._elapsed_since_reset[:] = motion.clip.joint_pos.shape[0]
-        env._gate.enabled[0] = False
-        state = env.compute_transition(env.state)
-        assert state.reward_terms["box_success_bonus"][0] == pytest.approx(10.0)
-        assert state.metrics["box_success"][0]
-        assert state.terminated[0]
+        motion.clip_ended[0, 0] = True
+        env.state.terminated[:] = False
+
+        # Exercise the host-side bonus without conflating this focused check
+        # with body-tracking termination when the robot remains at start pose.
+        with patch.object(OmniRetargetEnv, "compute_transition", lambda self, state: state):
+            state = env.compute_transition(env.state)
+            assert state.reward_terms["box_success_bonus"][0] == pytest.approx(10.0)
+            assert state.reward[0] == pytest.approx(10.0)
+            assert state.metrics["box_success"][0]
+            assert state.terminated[0]
+
+            # Reaching the end again cannot double-count the terminal bonus.
+            state.terminated[:] = False
+            state = env.compute_transition(state)
+            assert state.reward_terms["box_success_bonus"][0] == pytest.approx(0.0)
+
+            # A random-start (non-full) episode cannot get the full completion bonus.
+            env._box_success_counted[:] = False
+            env._started_from_zero[:] = False
+            state.terminated[:] = False
+            state = env.compute_transition(state)
+            assert state.reward_terms["box_success_bonus"][0] == pytest.approx(0.0)
     finally:
         del env
