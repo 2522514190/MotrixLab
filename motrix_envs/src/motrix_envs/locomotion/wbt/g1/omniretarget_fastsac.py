@@ -12,12 +12,36 @@ from motrix_envs.locomotion.wbt.g1.omniretarget import (
     OmniRetargetEnvCfg,
     make_omniretarget_cfg,
 )
+from motrix_envs.locomotion.wbt.g1.common import MOTION_DIR
 
 
 @registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac")
 def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
     """Build the common FastSAC carrying task configuration."""
     cfg = make_omniretarget_cfg()
+    # FastSAC-only trajectory swap: leave the shared PPO recipe untouched.
+    motion_path = MOTION_DIR / "sub3_largebox_003_unilab.npz"
+    if not motion_path.is_file():
+        raise FileNotFoundError(
+            f"Unilab carrying motion not found: {motion_path}. "
+            "Copy the provided NPZ into the G1 motion asset directory first."
+        )
+    with np.load(motion_path, allow_pickle=False) as motion:
+        frames = int(motion["num_frames"])
+        fps = int(motion["fps"])
+        if frames < 2 or fps != int(round(1.0 / cfg.ctrl_dt)):
+            raise ValueError(
+                f"Unexpected Unilab motion metadata: frames={frames}, fps={fps}, ctrl_dt={cfg.ctrl_dt}"
+            )
+    cfg.commands.motion.motion_files = (str(motion_path),)
+    cfg.max_episode_seconds = 16.0
+    if cfg.max_episode_steps <= frames:
+        raise ValueError(
+            f"Episode horizon {cfg.max_episode_steps} must exceed {frames} motion frames."
+        )
+    # Keep both the box curriculum and its delayed error-termination gate
+    # aligned to the actual reference, rather than the old 325-frame clip.
+    cfg.object_curriculum.reference_frames = frames
     cfg.commands.motion.start_at_timestep_zero_prob = 0.3
     cfg.object_curriculum.from_zero_only = True
     cfg.randomize_initial_episode_progress = False
@@ -84,7 +108,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         return np.float32(min(self._box_reward_weight, np.min(self._box_curriculum_state[valid, 2])))
 
     def _update_curriculum_from_finished(self, env_ids: np.ndarray) -> None:
-        frames = self.cfg.object_curriculum.reference_frames
+        frames = self.command_terms["motion"].clip.joint_pos.shape[0]
         ratios = np.minimum(self._elapsed_since_reset[env_ids], frames) / frames
         for ratio in ratios:
             if self._box_curriculum_ema is None:
@@ -167,7 +191,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         ori_error = 2.0 * np.arccos(np.clip(np.abs(quat_dot) / quat_den, 0.0, 1.0))
         reached_end = self._started_from_zero & motion.clip_ended[:, 0] & ~self._box_success_counted
         success = reached_end & (pos_error < 0.15) & (ori_error < 0.30) & ~state.terminated
-        self._box_success_bonus[success] = 5.0
+        self._box_success_bonus[success] = 10.0
         self._box_success_mask[success] = True
         self._box_success_counted[reached_end] = True
         self._box_success_total += int(np.count_nonzero(success))
