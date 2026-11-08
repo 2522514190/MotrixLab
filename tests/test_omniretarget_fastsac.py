@@ -105,6 +105,10 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
         assert env.cfg.commands.motion.start_at_timestep_zero_prob == pytest.approx(0.3)
         assert env.cfg.object_curriculum.from_zero_only
         assert not env.cfg.randomize_initial_episode_progress
+        assert env.cfg.max_episode_steps == 800
+        assert env.cfg.object_curriculum.reference_frames == 725
+        assert env.command_terms["motion"].clip.joint_pos.shape[0] == 725
+        assert env.cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_unilab.npz")
         assert not env._gate.enabled[0]
         indices = env._box_weight_indices
         np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.5)
@@ -117,7 +121,7 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
         env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
         assert env._box_reward_weight == pytest.approx(0.5)
         for _ in range(256):
-            env._elapsed_since_reset[:] = 325
+            env._elapsed_since_reset[:] = env.cfg.object_curriculum.reference_frames
             env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
         assert env._box_curriculum_enabled
         assert env._box_reward_weight < 0.5
@@ -172,3 +176,42 @@ def test_carry_ablation_configs_control_sampling_and_error_gate():
                 assert not bool(env._gate.enabled[0])
         finally:
             del env
+
+
+@pytest.mark.numba
+def test_unilab_bonus_is_ten_and_ablation_config_is_unchanged():
+    """Regression guard: A-H retain their switches and full-clip end bonus is +10."""
+    from motrix_envs.locomotion.wbt.g1.omniretarget_fastsac import OmniRetargetFastSacEnv
+
+    cfg = registry.make_env_config("g1-29dof-wbt-largebox-omniretarget-fastsac-a")
+    cfg.commands.motion.start_at_timestep_zero_prob = 1.0
+    env = OmniRetargetFastSacEnv(cfg, num_envs=1, seed=31)
+    try:
+        env.init_state()
+        assert env._started_from_zero[0]
+        # Force the motion clock to its final reference step and position the
+        # real object at the reference final pose through backend sim writes.
+        # The runtime reward must be +10, not +10 * ctrl_dt.
+        from motrix_env_core.sim.write import BodyPositionWrite, BodyRotationWrite
+
+        motion = env.command_terms["motion"]
+        motion.steps[0, 0] = motion.clip.joint_pos.shape[0] - 1
+        final_pos = motion.clip.extensions["object_pos_w"].data[-1]
+        final_quat = motion.clip.extensions["object_quat_w"].data[-1]
+        writes = env.sim.compile_writes(
+            {"p": BodyPositionWrite(("baseLink",)), "q": BodyRotationWrite(("baseLink",))}
+        )
+        writes.buffer("p")[0, 0] = final_pos
+        writes.buffer("q")[0, 0] = final_quat
+        writes.execute(np.array([0], dtype=np.int64))
+        env._refresh_sim_reads()
+        # The step transition increments the reference index and sets clip_ended.
+        # Avoid physics/action perturbing the deliberately constructed end pose.
+        env._elapsed_since_reset[:] = motion.clip.joint_pos.shape[0]
+        env._gate.enabled[0] = False
+        state = env.compute_transition(env.state)
+        assert state.reward_terms["box_success_bonus"][0] == pytest.approx(10.0)
+        assert state.metrics["box_success"][0]
+        assert state.terminated[0]
+    finally:
+        del env
