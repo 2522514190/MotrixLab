@@ -24,6 +24,7 @@ def run(cfg: DeploymentExportConfig) -> None:
         run_dir,
         output,
         profile_builder=build_deployment_profile,
+        checkpoint=cfg.checkpoint,
         validation_seed=cfg.validation.seed,
         validation_samples=cfg.validation.samples,
         atol=cfg.validation.atol,

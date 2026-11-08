@@ -366,3 +366,23 @@ def test_mujoco_compiler_applies_urdf_augmentations(tmp_path):
     assert model.actuator_forcerange[actuator_id] == pytest.approx([-5.0, 5.0])
     assert model.actuator_gainprm[actuator_id, 0] == pytest.approx(20.0)
     assert model.actuator_biasprm[actuator_id, :3] == pytest.approx([0.0, -20.0, -2.0])
+
+
+def test_urdf_body_is_free_floating(tmp_path):
+    from motrix_env_core.config.scene import BodyCfg
+    from motrix_env_mujoco.compiler import MuJoCoSceneCompiler
+
+    urdf = tmp_path / "prop.urdf"
+    urdf.write_text(
+        '<robot name="prop"><link name="root"><inertial><mass value="1"/>'
+        '<inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>'
+        "</inertial></link></robot>"
+    )
+
+    @configclass
+    class Props(SceneObjsCfg):
+        prop: BodyCfg = BodyCfg(model=UrdfFileCfg(file=urdf), base_link_name="root")
+
+    model = MuJoCoSceneCompiler().compile(SceneCfg(objs=Props()), SimCfg())
+    assert model.nq == 7
+    assert model.nv == 6

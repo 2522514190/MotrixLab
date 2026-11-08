@@ -153,7 +153,7 @@ def test_urdf_overrides_follow_joint_and_site_augmentation(urdf_file, actuators)
     model = build_mujoco_model(_scene(_body(source, actuators, prefix="u_")))
     assert model.nu == (0 if not actuators else 1)
     assert model.site("u_marker").id >= 0
-    np.testing.assert_allclose(model.dof_armature, [0.04])
+    np.testing.assert_allclose(model.dof_armature[model.jnt_dofadr[model.joint("u_hinge").id]], 0.04)
     if actuators:
         np.testing.assert_allclose(model.actuator_ctrlrange, [[-0.5, 0.8]])
 

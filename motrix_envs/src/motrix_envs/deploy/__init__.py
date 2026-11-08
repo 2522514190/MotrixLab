@@ -14,4 +14,6 @@ def register() -> None:
     register_profile_compiler("go2-walk-flat", build_go2_walk_profile)
     register_profile_compiler("go2-walk-rough", build_go2_walk_profile)
     register_profile_compiler("g1-wbt-dance", build_g1_wbt_profile)
+    for suffix in ("", *(f"-{letter}" for letter in "abcdefgh")):
+        register_profile_compiler(f"g1-29dof-wbt-largebox-omniretarget-fastsac{suffix}", build_g1_wbt_profile)
     register_profile_compiler("g1-walk-flat", build_g1_walk_profile)

@@ -190,3 +190,30 @@ def test_measured_fk_matches_randomized_simulator_world_orientation(profile, bac
             np.testing.assert_allclose(observation[58:64], expected, atol=1e-5, rtol=0)
     finally:
         runtime.close()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["mujoco", "motrixsim"])
+def test_simulation_initial_world_velocity_is_reported_in_body_frame(profile, backend):
+    from motrix_deploy.runtime.config import FloatingBodyState, SimulationInitialState
+
+    quaternion = _random_quaternion(np.random.default_rng(42))
+    angular = np.array([0.4, -0.7, 1.2])
+    robot = UnitreeG129Dof()
+    initial = SimulationInitialState(
+        bodies={
+            "pelvis": FloatingBodyState((0.2, -0.3, 1.5), tuple(quaternion.tolist()), (0.1, 0.2, 0.3), tuple(angular))
+        },
+        joint_positions=dict(zip(profile.robot.joint_names, profile.robot.default_joint_position.tolist())),
+        joint_velocities={name: 0.25 for name in profile.robot.joint_names},
+    )
+    config = SimulationRuntimeConfig(
+        scene=SceneCfg(objs=_FlatG1Objs(robot=robot)),
+        initial_state=initial,
+        sensor_bindings=SensorBindings(base_angular_velocity="base_gyro", base_linear_acceleration="base_accel"),
+    )
+    with create_simulation_runtime(backend, config) as runtime:
+        state = runtime.robot.read_state(0.1)
+        np.testing.assert_allclose(state.base_angular_velocity, _rotation(quaternion).T @ angular, atol=1e-6)
+        np.testing.assert_allclose(state.joint_velocity, 0.25, atol=1e-6)
+        np.testing.assert_allclose(_rotation(state.base_orientation_xyzw), _rotation(quaternion), atol=1e-6)

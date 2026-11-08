@@ -58,6 +58,7 @@ class DeploymentExportConfig:
 
     env: str | None = None
     run_dir: str | None = None
+    checkpoint: str | None = None
     output: str | None = None
     validation: OnnxParityConfig = field(
         default_factory=lambda: OnnxParityConfig(atol=1e-5),

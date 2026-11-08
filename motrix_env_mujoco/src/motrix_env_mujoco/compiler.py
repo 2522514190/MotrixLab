@@ -273,6 +273,9 @@ class MuJoCoSceneCompiler(SceneCompiler[mj.MjModel]):
                 raise ValueError(
                     f"MuJoCo requires BodyCfg.base_link_name {cfg.base_link_name!r} to be the first root body"
                 )
+            # URDF roots are imported fixed by MuJoCo; BodyCfg represents a free body.
+            if isinstance(cfg.model, UrdfFileCfg) and not list(base_link.joints):
+                base_link.add_freejoint()
             placement = spec.worldbody.add_frame(
                 pos=cfg.translation,
                 quat=_mujoco_quat(cfg.rotation),

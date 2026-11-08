@@ -16,3 +16,4 @@ hydra:
 artifact: ???
 runtime: ???
 duration_s: null
+loop: false

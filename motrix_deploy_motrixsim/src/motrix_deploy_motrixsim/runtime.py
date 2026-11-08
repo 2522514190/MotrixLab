@@ -164,11 +164,30 @@ class MotrixSimRuntime(SimulationRuntime):
             raise RuntimeError("MotrixSim model is not available")
         position = np.asarray(self.model.compute_init_dof_pos(), dtype=np.float32).copy()
         position[self._robot.joint_dof_pos_indices] = self.initial_joint_position(self.robot.spec)
+        velocity = np.zeros(self.model.num_dof_vel, dtype=np.float32)
+        initial = self.config.initial_state
+        if initial is not None:
+            for name, value in initial.joint_positions.items():
+                position[self.model.get_joint(name).dof_pos_index] = value
+            for name, value in initial.joint_velocities.items():
+                velocity[self.model.get_joint(name).dof_vel_index] = value
+            for name, state in initial.bodies.items():
+                base = self.model.get_body(name).floatingbase
+                position[base.dof_pos_indices[:3]] = state.position
+                position[base.dof_pos_indices[3:]] = state.quaternion_xyzw
+                velocity[base.dof_vel_indices[:3]] = state.linear_velocity
+                # Native generalized angular velocity is body-local, while the reset contract is world-frame.
+                x, y, z, w = state.quaternion_xyzw
+                vector = np.asarray((x, y, z))
+                angular = np.asarray(state.angular_velocity)
+                velocity[base.dof_vel_indices[3:]] = (
+                    angular - 2 * w * np.cross(vector, angular) + 2 * np.cross(vector, np.cross(vector, angular))
+                )
         self.data = mtx.SceneData(self.model, batch=[1])
         self.data.reset(
             self.model,
             dof_pos=position,
-            dof_vel=np.zeros(self.model.num_dof_vel, dtype=np.float32),
+            dof_vel=velocity,
             forward_kinematic=True,
         )
         self.simulation_time_s = 0.0
@@ -189,6 +208,10 @@ class MotrixSimRuntime(SimulationRuntime):
         self.check_viewer_running()
         for _ in range(self.physics_substeps):
             self._step()
+        self.sync_viewer()
+
+    def _reset_for_replay(self) -> None:
+        self._robot.bind()
         self.sync_viewer()
 
     def _physics_time_s(self) -> float:

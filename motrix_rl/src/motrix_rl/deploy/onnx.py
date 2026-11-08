@@ -16,6 +16,7 @@ from motrix_rl.runs import open_run_context, read_task_config
 def export_onnx_model(
     run_dir: str | Path,
     *,
+    checkpoint: str | Path | None = None,
     opset: int = 18,
     validation_seed: int = 1,
     validation_samples: int = 32,
@@ -25,6 +26,7 @@ def export_onnx_model(
     """Return a validated in-memory ONNX policy for deployment composition."""
     _, exported = _export_onnx_model(
         run_dir,
+        checkpoint=checkpoint,
         opset=opset,
         validation_seed=validation_seed,
         validation_samples=validation_samples,
@@ -38,6 +40,7 @@ def export_onnx(
     run_dir: str | Path,
     output: str | Path | None = None,
     *,
+    checkpoint: str | Path | None = None,
     opset: int = 18,
     validation_seed: int = 1,
     validation_samples: int = 32,
@@ -47,6 +50,7 @@ def export_onnx(
     """Export the best policy in a training run to a self-contained ONNX model."""
     checkpoint, exported = _export_onnx_model(
         run_dir,
+        checkpoint=checkpoint,
         opset=opset,
         validation_seed=validation_seed,
         validation_samples=validation_samples,
@@ -77,6 +81,7 @@ def export_onnx(
 def _export_onnx_model(
     run_dir: str | Path,
     *,
+    checkpoint: str | Path | None = None,
     opset: int,
     validation_seed: int,
     validation_samples: int,
@@ -103,7 +108,11 @@ def _export_onnx_model(
         metadata_identity = (metadata.env_name, metadata.rllib, metadata.train_backend, metadata.algo)
         raise ValueError(f"task_config identity {task_identity} does not match run metadata {metadata_identity}")
 
-    checkpoint = checkpoints.best_policy(metadata, run.run_dir)
+    checkpoint = (
+        checkpoints.resolve_checkpoint_path(checkpoint, metadata=metadata)
+        if checkpoint is not None
+        else checkpoints.best_policy(metadata, run.run_dir)
+    )
     request = OnnxExportRequest(
         run=run,
         checkpoint=checkpoint,

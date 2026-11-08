@@ -164,8 +164,35 @@ class MujocoRuntime(SimulationRuntime):
         # model root pose. Keep it intact instead of applying placement twice.
         qpos[joint_qpos_indices] = joint_position
         self.data.qvel.fill(0.0)
+        initial = self.config.initial_state
+        if initial is not None:
+            for name, value in initial.joint_positions.items():
+                joint = self.model.joint(name).id
+                qpos[self.model.jnt_qposadr[joint]] = value
+            for name, value in initial.joint_velocities.items():
+                joint = self.model.joint(name).id
+                self.data.qvel[self.model.jnt_dofadr[joint]] = value
+            for name, state in initial.bodies.items():
+                body = self.model.body(name).id
+                joint = int(self.model.body_jntadr[body])
+                if joint < 0 or self.model.jnt_type[joint] != self.mj.mjtJoint.mjJNT_FREE:
+                    raise ValidationError("initial_state.bodies", "floating body", name)
+                pos = int(self.model.jnt_qposadr[joint])
+                vel = int(self.model.jnt_dofadr[joint])
+                xyzw = np.asarray(state.quaternion_xyzw)
+                wxyz = xyzw[[3, 0, 1, 2]]
+                qpos[pos : pos + 3] = state.position
+                qpos[pos + 3 : pos + 7] = wxyz
+                self.data.qvel[vel : vel + 3] = state.linear_velocity
+                rotation = np.empty(9)
+                self.mj.mju_quat2Mat(rotation, wxyz)
+                self.data.qvel[vel + 3 : vel + 6] = rotation.reshape(3, 3).T @ state.angular_velocity
         self.data.ctrl.fill(0.0)
         self.mj.mj_forward(self.model, self.data)
+
+    def _reset_for_replay(self) -> None:
+        self._robot.bind()
+        self.sync_viewer()
 
     def _physics_time_s(self) -> float:
         return float(self.data.time)
@@ -191,6 +218,9 @@ class MujocoRuntime(SimulationRuntime):
         for _ in range(self.physics_substeps):
             self._robot.apply_control()
             self.mj.mj_step(self.model, self.data)
+        # mj_step integrates qpos/qvel after computing sensors. Refresh derived
+        # state so IMU, link pose and joints describe the same control instant.
+        self.mj.mj_forward(self.model, self.data)
         self.sync_viewer()
 
     def check_viewer_running(self) -> None:

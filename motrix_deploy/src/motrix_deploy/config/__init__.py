@@ -84,10 +84,13 @@ class DeployRunConfig:
     # expressible in OmegaConf, so the CLI narrows it by isinstance.
     runtime: Any = MISSING
     duration_s: float | None = None
+    loop: bool = False
 
     def __post_init__(self) -> None:
         if not self.artifact:
             raise ValueError("artifact must be a non-empty path")
+        if self.loop and not isinstance(self.runtime, SimRuntimeCfg):
+            raise ValueError("loop is supported only for simulation")
         if not isinstance(self.runtime, (SimRuntimeCfg, HardwareRuntimeCfg)):
             raise ValueError(
                 "runtime must be a composed SimRuntimeCfg or HardwareRuntimeCfg recipe, "

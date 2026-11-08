@@ -84,3 +84,10 @@ def test_deploy_run_config_rejects_untyped_hardware_mapping() -> None:
 def test_deploy_run_config_rejects_unknown_top_level_fields() -> None:
     with pytest.raises(OmegaConfBaseException, match="unknown"):
         _typed_config({"artifact": "artifact.deploy", "runtime": _sim_runtime(), "unknown": True})
+
+
+def test_loop_is_simulation_only():
+    cfg = _typed_config({"artifact": "artifact.deploy", "runtime": _sim_runtime(), "loop": True})
+    assert cfg.loop
+    with pytest.raises(ValueError, match="only for simulation"):
+        DeployRunConfig(artifact="artifact.deploy", runtime=HardwareRuntimeCfg(backend="test"), loop=True)

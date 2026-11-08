@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Annotated, ClassVar
 
 import numpy as np
-from pydantic import Field
+from pydantic import BeforeValidator, Field, TypeAdapter
 
 if TYPE_CHECKING:
     from motrix_deploy.artifact.io import Artifact
@@ -25,6 +25,7 @@ from motrix_deploy.contracts import (
 from motrix_deploy.errors import ValidationError
 from motrix_deploy.policy import Policy
 from motrix_deploy.policy.processing import PolicyProcessor
+from motrix_deploy.runtime.config import SimulationInitialState, SimulationRuntimeConfig
 from motrix_deploy.runtime.context import ControlContext
 from motrix_deploy.runtime.control import PolicyController
 from motrix_deploy.runtime.lifecycle import ControllerStep
@@ -45,6 +46,14 @@ class G1WbtTaskSpec(TaskSpec):
     action_scale: GainVector
     kp: GainVector
     kd: GainVector
+    action_safety_clip_fraction: Annotated[FiniteFloat, Field(gt=0, le=1)] = 1.0
+    simulation_initial_state: (
+        Annotated[
+            SimulationInitialState,
+            BeforeValidator(lambda value: TypeAdapter(SimulationInitialState).validate_python(value, strict=False)),
+        ]
+        | None
+    ) = None
     preparation_joint_position: JointVector | None = None
     preparation_kp: GainVector | None = None
     preparation_kd: GainVector | None = None
@@ -263,7 +272,11 @@ class G1WbtPolicyProcessor(PolicyProcessor[None]):
         # Neither the raw action nor the scaled target is clipped before the
         # robot limit clamp below: this matches the training joint-position term.
         target = self._default_joint_position + self._action_scale * raw
-        target = np.clip(target, self.robot.position_lower, self.robot.position_upper).astype(np.float32)
+        midpoint = (self.robot.position_lower + self.robot.position_upper) * 0.5
+        half_range = (self.robot.position_upper - self.robot.position_lower) * (
+            0.5 * self.spec.action_safety_clip_fraction
+        )
+        target = np.clip(target, midpoint - half_range, midpoint + half_range).astype(np.float32)
         zeros = np.zeros(29, dtype=np.float32)
         return JointServoCommand(target, zeros, zeros, self._kp, self._kd)
 
@@ -431,6 +444,12 @@ class G1WbtDeployTask(DeployTask[None]):
         # request methods only) or attach a keyboard for operator staging.
         self._automatic_hold_ticks = 0 if automatic_start else None
         self._held_ticks = 0
+        self._direct_playback = False
+
+    def configure_simulation(self, config: SimulationRuntimeConfig) -> SimulationRuntimeConfig:
+        initial = self.spec.simulation_initial_state
+        self._direct_playback = initial is not None
+        return replace(config, initial_state=initial) if initial is not None else config
 
     @property
     def phase(self) -> str:
@@ -470,8 +489,13 @@ class G1WbtDeployTask(DeployTask[None]):
         self.policy_io.reset_reference()
         self.transitions.clear()
         self._record = None
-        self._enter_phase("prepare")
-        self.ready.reset(state)
+        if self._direct_playback:
+            self._enter_phase("playback")
+            self.policy_controller.steps = self._playback_budget
+            self.policy_controller.reset(state)
+        else:
+            self._enter_phase("prepare")
+            self.ready.reset(state)
 
     def request_policy_start(self) -> None:
         """Latch operator intent; takeover still requires measured preparation readiness."""

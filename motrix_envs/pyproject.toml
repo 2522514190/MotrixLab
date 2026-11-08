@@ -25,5 +25,8 @@ builtin = "motrix_envs:register"
 [project.entry-points."motrix_deploy.profiles"]
 builtin = "motrix_envs.deploy:register"
 
+[project.entry-points."motrix_deploy.envs"]
+g1-largebox = "motrix_envs.deploy.largebox:build_scene"
+
 [project.optional-dependencies]
 deploy = ["motrix-deploy==0.4.0", "motrix-deploy-tasks==0.4.0"]

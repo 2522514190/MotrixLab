@@ -466,3 +466,42 @@ def test_sdk_viewer_lifecycle_and_keyboard(monkeypatch):
     held["w"] = False
     keyboard.poll()
     assert keyboard.is_key_up("w") and not keyboard.is_pressing("w")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["motrixsim", "mujoco"])
+def test_replay_uses_fresh_session_and_restores_initial_state(backend):
+    runtime = create_simulation_runtime(backend, config())
+    controller = bind_session(runtime, steps=4)
+    with runtime:
+        initial = runtime.robot.read_state(0.1)
+        first = runtime.run(realtime=False)
+        assert first.success
+        session = ControlSession(
+            controller=controller,
+            robot=runtime.robot,
+            command_binding=ConstantPlanarVelocityBinding((0, 0, 0)),
+            period_s=0.006,
+            state_timeout_s=0.1,
+        )
+        runtime.restart(session)
+        restored = runtime.robot.read_state(0.1)
+        np.testing.assert_array_equal(restored.joint_position, initial.joint_position)
+        np.testing.assert_array_equal(restored.joint_velocity, initial.joint_velocity)
+        assert restored.sample_time_ns == 0
+        second = runtime.run(realtime=False)
+        assert second.success
+        assert second.trace_sha256 == first.trace_sha256
+
+
+@pytest.mark.integration
+def test_mujoco_state_fields_share_post_integration_timestamp():
+    runtime = create_simulation_runtime("mujoco", config())
+    bind_session(runtime)
+    with runtime:
+        runtime.data.qvel[3:6] = (0.8, -0.5, 0.3)
+        runtime.mj.mj_forward(runtime.model, runtime.data)
+        runtime.advance_control_period()
+        measured = runtime.robot.read_state(0.1)
+        np.testing.assert_allclose(measured.base_orientation_xyzw, runtime.data.qpos[[4, 5, 6, 3]], atol=1e-7)
+        np.testing.assert_allclose(measured.base_angular_velocity, runtime.data.qvel[3:6], atol=1e-7)

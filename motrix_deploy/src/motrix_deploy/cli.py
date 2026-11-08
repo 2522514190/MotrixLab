@@ -39,7 +39,9 @@ def run(cfg: DeployRunConfig) -> int:
     simulation = isinstance(cfg.runtime, SimRuntimeCfg)
     spawn_pose = cfg.runtime.robot_init_key_pose if simulation else None
     if simulation:
-        runtime = create_simulation_runtime(cfg.runtime.backend, cfg.runtime.build_runtime_config())
+        runtime = create_simulation_runtime(
+            cfg.runtime.backend, task.configure_simulation(cfg.runtime.build_runtime_config())
+        )
     else:
         runtime = create_hardware_runtime(
             cfg.runtime.backend,
@@ -69,9 +71,21 @@ def run(cfg: DeployRunConfig) -> int:
     if task.operator_hint:
         print(task.operator_hint)
     with runtime:
-        result = runtime.run()
-    print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
-    return 0 if result.success else 1
+        while True:
+            result = runtime.run()
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True), flush=True)
+            if not cfg.loop or result.exit_reason not in {"completed", "task_terminated"}:
+                break
+            runtime.restart(
+                ControlSession(
+                    controller=task,
+                    robot=robot,
+                    command_binding=command_binding,
+                    period_s=manifest.control.period_s,
+                    state_timeout_s=manifest.control.state_timeout_s,
+                )
+            )
+    return 0 if result.success or (cfg.loop and result.exit_reason == "interrupted") else 1
 
 
 def _duration_steps(duration_s: float | None, control_period_s: float) -> int | None:

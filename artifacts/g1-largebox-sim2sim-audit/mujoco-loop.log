@@ -1,0 +1,146 @@
+Converting 29 actuators from position servos to torque motors with MjSpec: left_hip_pitch_joint, left_hip_roll_joint, left_hip_yaw_joint, left_knee_joint, left_ankle_pitch_joint, left_ankle_roll_joint, right_hip_pitch_joint, right_hip_roll_joint, right_hip_yaw_joint, right_knee_joint, right_ankle_pitch_joint, right_ankle_roll_joint, waist_yaw_joint, waist_roll_joint, waist_pitch_joint, left_shoulder_pitch_joint, left_shoulder_roll_joint, left_shoulder_yaw_joint, left_elbow_joint, left_wrist_roll_joint, left_wrist_pitch_joint, left_wrist_yaw_joint, right_shoulder_pitch_joint, right_shoulder_roll_joint, right_shoulder_yaw_joint, right_elbow_joint, right_wrist_roll_joint, right_wrist_pitch_joint, right_wrist_yaw_joint
+Built MuJoCo deployment model from SceneCfg StandardSceneCfg
+{
+  "completed_steps": 5,
+  "error": null,
+  "exit_reason": "completed",
+  "latency": {
+    "action": {
+      "max_ms": 0.042137,
+      "mean_ms": 0.0376276,
+      "p95_ms": 0.041917
+    },
+    "inference": {
+      "max_ms": 0.192896,
+      "mean_ms": 0.1589868,
+      "p95_ms": 0.1868666
+    },
+    "input": {
+      "max_ms": 0.00424,
+      "mean_ms": 0.003313142857142857,
+      "p95_ms": 0.004029
+    },
+    "loop": {
+      "max_ms": 0.826062,
+      "mean_ms": 0.41916025,
+      "p95_ms": 0.7316006500000001
+    },
+    "observation": {
+      "max_ms": 0.130881,
+      "mean_ms": 0.0848142,
+      "p95_ms": 0.1195898
+    },
+    "read": {
+      "max_ms": 0.238863,
+      "mean_ms": 0.18313728571428572,
+      "p95_ms": 0.237483
+    },
+    "write": {
+      "max_ms": 0.084865,
+      "mean_ms": 0.05041664999999999,
+      "p95_ms": 0.0792505
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 0.10000000000000002,
+  "real_time_factor": 0.24961291277551342,
+  "success": true,
+  "trace_sha256": "d8347707c6a3cb7a2da2aabc80ca392dc9ad9f426fe5e3b3603dfdc542df04be",
+  "wall_time_s": 0.4006203
+}
+{
+  "completed_steps": 5,
+  "error": null,
+  "exit_reason": "completed",
+  "latency": {
+    "action": {
+      "max_ms": 0.055937,
+      "mean_ms": 0.0437612,
+      "p95_ms": 0.054683
+    },
+    "inference": {
+      "max_ms": 0.179638,
+      "mean_ms": 0.1579014,
+      "p95_ms": 0.1755862
+    },
+    "input": {
+      "max_ms": 0.00431,
+      "mean_ms": 0.0031681904761904764,
+      "p95_ms": 0.004139
+    },
+    "loop": {
+      "max_ms": 0.930155,
+      "mean_ms": 0.42659335,
+      "p95_ms": 0.89543535
+    },
+    "observation": {
+      "max_ms": 0.140881,
+      "mean_ms": 0.10883240000000001,
+      "p95_ms": 0.139303
+    },
+    "read": {
+      "max_ms": 0.241053,
+      "mean_ms": 0.17623971428571428,
+      "p95_ms": 0.232484
+    },
+    "write": {
+      "max_ms": 0.078385,
+      "mean_ms": 0.05052205,
+      "p95_ms": 0.077188
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 0.10000000000000002,
+  "real_time_factor": 0.24972932275732654,
+  "success": true,
+  "trace_sha256": "d8347707c6a3cb7a2da2aabc80ca392dc9ad9f426fe5e3b3603dfdc542df04be",
+  "wall_time_s": 0.400433553
+}
+{
+  "completed_steps": 4,
+  "error": "rollout interrupted by user",
+  "exit_reason": "interrupted",
+  "latency": {
+    "action": {
+      "max_ms": 0.040317,
+      "mean_ms": 0.03585725,
+      "p95_ms": 0.040101
+    },
+    "inference": {
+      "max_ms": 0.15218,
+      "mean_ms": 0.14226525,
+      "p95_ms": 0.15195785
+    },
+    "input": {
+      "max_ms": 0.003419,
+      "mean_ms": 0.002317,
+      "p95_ms": 0.0033395
+    },
+    "loop": {
+      "max_ms": 0.703361,
+      "mean_ms": 0.5865640000000001,
+      "p95_ms": 0.6993923
+    },
+    "observation": {
+      "max_ms": 0.075984,
+      "mean_ms": 0.0724925,
+      "p95_ms": 0.07575314999999999
+    },
+    "read": {
+      "max_ms": 0.193297,
+      "mean_ms": 0.13909775000000002,
+      "p95_ms": 0.19113565
+    },
+    "write": {
+      "max_ms": 0.040277,
+      "mean_ms": 0.038589750000000006,
+      "p95_ms": 0.0402635
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 0.08,
+  "real_time_factor": 1.0113368714195277,
+  "success": false,
+  "trace_sha256": "714ee0b90455a16b6d2951c1ad6b0bf8707fb4b7ed785cb101c96c6a621366f3",
+  "wall_time_s": 0.079103217
+}

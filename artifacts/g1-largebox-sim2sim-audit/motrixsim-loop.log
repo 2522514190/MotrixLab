@@ -1,0 +1,145 @@
+Motphys profiler initialized: disabled
+{
+  "completed_steps": 5,
+  "error": null,
+  "exit_reason": "completed",
+  "latency": {
+    "action": {
+      "max_ms": 0.044947,
+      "mean_ms": 0.038879399999999995,
+      "p95_ms": 0.044349
+    },
+    "inference": {
+      "max_ms": 0.219114,
+      "mean_ms": 0.1825894,
+      "p95_ms": 0.2162164
+    },
+    "input": {
+      "max_ms": 0.003979,
+      "mean_ms": 0.003078571428571429,
+      "p95_ms": 0.003889
+    },
+    "loop": {
+      "max_ms": 0.852801,
+      "mean_ms": 0.44226020000000005,
+      "p95_ms": 0.8341534500000001
+    },
+    "observation": {
+      "max_ms": 0.137881,
+      "mean_ms": 0.09921719999999998,
+      "p95_ms": 0.136279
+    },
+    "read": {
+      "max_ms": 0.57158,
+      "mean_ms": 0.20773614285714284,
+      "p95_ms": 0.275771
+    },
+    "write": {
+      "max_ms": 0.044157,
+      "mean_ms": 0.0286191,
+      "p95_ms": 0.0431215
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 0.10000000000000002,
+  "real_time_factor": 0.24965408554042737,
+  "success": true,
+  "trace_sha256": "2ce7f94fbe6947afeb893071f54d34e1024c95a12b3d9e0f1614d4a2131da2ad",
+  "wall_time_s": 0.40055423
+}
+{
+  "completed_steps": 5,
+  "error": null,
+  "exit_reason": "completed",
+  "latency": {
+    "action": {
+      "max_ms": 0.078224,
+      "mean_ms": 0.0466026,
+      "p95_ms": 0.0711166
+    },
+    "inference": {
+      "max_ms": 0.159649,
+      "mean_ms": 0.15426320000000002,
+      "p95_ms": 0.15931900000000002
+    },
+    "input": {
+      "max_ms": 0.00451,
+      "mean_ms": 0.0031707142857142854,
+      "p95_ms": 0.00368
+    },
+    "loop": {
+      "max_ms": 0.811583,
+      "mean_ms": 0.41303729999999994,
+      "p95_ms": 0.6940680000000001
+    },
+    "observation": {
+      "max_ms": 0.126432,
+      "mean_ms": 0.0841644,
+      "p95_ms": 0.11620259999999999
+    },
+    "read": {
+      "max_ms": 0.250032,
+      "mean_ms": 0.1966193333333333,
+      "p95_ms": 0.249733
+    },
+    "write": {
+      "max_ms": 0.044107,
+      "mean_ms": 0.029162,
+      "p95_ms": 0.0435465
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 0.10000000000000002,
+  "real_time_factor": 0.2496196582709874,
+  "success": true,
+  "trace_sha256": "2ce7f94fbe6947afeb893071f54d34e1024c95a12b3d9e0f1614d4a2131da2ad",
+  "wall_time_s": 0.400609474
+}
+{
+  "completed_steps": 5,
+  "error": "rollout interrupted by user",
+  "exit_reason": "interrupted",
+  "latency": {
+    "action": {
+      "max_ms": 0.051837,
+      "mean_ms": 0.0376316,
+      "p95_ms": 0.049422999999999995
+    },
+    "inference": {
+      "max_ms": 0.184427,
+      "mean_ms": 0.14450780000000002,
+      "p95_ms": 0.1790674
+    },
+    "input": {
+      "max_ms": 0.005,
+      "mean_ms": 0.0028376,
+      "p95_ms": 0.004555999999999999
+    },
+    "loop": {
+      "max_ms": 0.920676,
+      "mean_ms": 0.5959206,
+      "p95_ms": 0.878715
+    },
+    "observation": {
+      "max_ms": 0.106912,
+      "mean_ms": 0.0771366,
+      "p95_ms": 0.10083459999999998
+    },
+    "read": {
+      "max_ms": 0.254892,
+      "mean_ms": 0.1394184,
+      "p95_ms": 0.2468126
+    },
+    "write": {
+      "max_ms": 0.034008,
+      "mean_ms": 0.024360399999999997,
+      "p95_ms": 0.031827999999999995
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 0.10000000000000002,
+  "real_time_factor": 1.0457785480889605,
+  "success": false,
+  "trace_sha256": "2ce7f94fbe6947afeb893071f54d34e1024c95a12b3d9e0f1614d4a2131da2ad",
+  "wall_time_s": 0.095622539
+}

@@ -71,3 +71,25 @@ for the complete runtime, session, and controller contracts.
 ```bash
 python -m pytest motrix_deploy_tasks/tests -q
 ```
+
+
+### G1 OmniRetarget large-box sim2sim
+
+All FastSAC large-box ablations (`a`–`h`) share `task=g1-largebox/sim`.
+Export each run with an explicit checkpoint, then select its artifact:
+
+```bash
+mxlab export-deploy run_dir=<run-dir> checkpoint=<absolute-checkpoint-path> output=artifacts/largebox.deploy
+mxlab deploy task=g1-largebox/sim artifact=artifacts/largebox.deploy runtime.backend=motrixsim
+mxlab deploy task=g1-largebox/sim artifact=artifacts/largebox.deploy runtime.backend=mujoco
+```
+
+The artifact carries the frame-zero robot and box state; simulation starts directly
+in playback. Rewards and training sampling do not run in deployment. The shared
+WBT safety stops apply to every ablation. Set `runtime.viewer=false` for a headless
+rollout. Add `loop=true` to reset and replay after completion or a task termination,
+keeping the viewer open; close the viewer or press Ctrl+C to exit. Each episode
+restores the robot, box, reference clock and policy history. Successful completion
+means the playback budget finished, not a measured
+box-carry success score. Physical transfer between simulators must be evaluated
+separately for each policy.

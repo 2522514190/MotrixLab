@@ -503,3 +503,27 @@ def test_default_automatic_start_progresses_after_measured_readiness():
     # Default zero hold target: the next held tick enters playback by itself.
     task.step(state, ControlContext(2, 0.04, None, dt_s=0.02))
     assert task.phase == "playback"
+
+
+def test_simulation_initial_state_roundtrip_and_direct_playback():
+    from motrix_deploy.runtime.config import SimulationInitialState, SimulationRuntimeConfig
+    from motrix_env_core.config.scene import SceneCfg
+
+    initial = SimulationInitialState(bodies={}, joint_positions={}, joint_velocities={})
+    task = _task(controller=True, preparation={"simulation_initial_state": initial})
+    decoded = G1WbtTaskSpec.model_validate(task.spec.to_dict()["config"])
+    assert decoded.simulation_initial_state == initial
+    config = task.configure_simulation(SimulationRuntimeConfig(scene=SceneCfg()))
+    assert config.initial_state == initial
+    task.reset(_state())
+    assert task.phase == "playback"
+    decision = task.step(_state(), ControlContext(0, 0.0, None, dt_s=0.02))
+    assert decision.policy_tick
+    assert task.playback_steps == 1
+
+
+def test_action_safety_fraction_clips_about_joint_midpoint():
+    task = _task(preparation={"action_safety_clip_fraction": 0.7})
+    command = task.process_action(np.full(29, 100, np.float32))
+    np.testing.assert_allclose(command.joint_position, 0.7)
+    np.testing.assert_array_equal(task.previous_action, 100)

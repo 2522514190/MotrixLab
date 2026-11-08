@@ -112,6 +112,20 @@ class SimulationRuntime(DeploymentRuntime, ABC):
         self._configure_session_period(session.period_s)
         super().bind_session(session)
 
+    def restart(self, session: ControlSession) -> None:
+        """Reset the simulation for a fresh single-use session, retaining the viewer."""
+        if not self._opened or not self._used or self.session is None or self.session.active:
+            raise ValidationError("runtime.restart", "an open runtime with a finished session", None)
+        if session is self.session or session.robot is not self.robot:
+            raise ValidationError("runtime.restart.session", "a fresh session for this robot", session)
+        self._reset_for_replay()
+        self.session = None
+        self._used = False
+        self.bind_session(session)
+
+    def _reset_for_replay(self) -> None:
+        raise NotImplementedError("This simulation backend does not support replay")
+
     def _configure_session_period(self, period_s: float) -> None:
         """Configure simulation substeps for the control interval."""
 

@@ -11,6 +11,7 @@ from motrix_deploy.artifact.schema import TaskSpec
 from motrix_deploy.contracts import FloatArray, RobotSpec, RobotState
 from motrix_deploy.operator import OperatorProfileCfg
 from motrix_deploy.policy import Policy
+from motrix_deploy.runtime.config import SimulationRuntimeConfig
 from motrix_deploy.runtime.context import ControlContext
 from motrix_deploy.runtime.lifecycle import ControllerStep
 from motrix_env_core.input import CommandBinding, InputDevice
@@ -45,6 +46,10 @@ class DeployTask(ABC, Generic[CommandT]):
     def command_bounds(self) -> tuple[FloatArray, FloatArray] | None:
         """Planar velocity command bounds, or None for autonomous tasks."""
         return None
+
+    def configure_simulation(self, config: SimulationRuntimeConfig) -> SimulationRuntimeConfig:
+        """Apply artifact-owned initial conditions before simulator construction."""
+        return config
 
     def prepare(
         self,

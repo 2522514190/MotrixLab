@@ -1,0 +1,11 @@
+ckpt=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-g/motrix/torch/fastsac/26-11-08_10-45-07-796932/checkpoints/latest.pt
+run_dir=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-g/motrix/torch/fastsac/26-11-08_10-45-07-796932
+out=artifacts/g1-largebox-g-model_latest.deploy
+mxlab export-deploy run_dir="$run_dir" checkpoint="$ckpt" output="$out"
+
+
+artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-largebox-g-model_latest.deploy
+mxlab deploy task=g1-largebox/sim artifact="$artifact" runtime.backend=motrixsim loop=true
+
+artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-largebox-g-model_latest.deploy
+mxlab deploy task=g1-largebox/sim artifact="$artifact" runtime.backend=mujoco loop=true

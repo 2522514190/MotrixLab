@@ -1,0 +1,108 @@
+BOX shape Shape.Mesh
+BOX mesh_name largebox.obj
+BOX mesh_scale [1. 1. 1.]
+BOX mesh_transform [[1. 0. 0.]
+ [0. 1. 0.]
+ [0. 0. 1.]]
+BOX mesh_variant_set None
+BOX local_pose [0. 0. 0. 0. 0. 0. 1.]
+BOX visual_only False
+BOX margin 0.0
+BOX gap 0.0
+BOX collision_affinity 1
+BOX collision_group 1
+aabb doc Get the source geometry AABB in geom-local coordinates.
+
+Args:
+    data (SceneData): The scene data to query.
+
+    out (Optional[NDArray[float]]): Pre-allocated output array of shape
+        ``(*data.shape, 2, 3)``. When provided, finite AABB results are written into this
+        array and returned directly.
+
+Returns:
+    Optional[NDArray[float]]: ``None`` when the source geom has no finite AABB, currently
+        only for ``InfinitePlane``. Otherwise returns an array with shape
+        ``(*data.shape, 2, 3)`` where ``[..., 0, :]`` is min and ``[..., 1, :]`` is max.
+
+Note:
+    Runtime size overrides in ``data``, when present, affect supported primitive bounds.
+native world geom
+largebox_collision ShapeType.Mesh PyPhysicsMaterial { contact_model: Impedance(ImpedanceSpring { spring: StiffnessDamping { k: 2500.0, d: 100.0 }, impedance: Impedance { d0: 0.9, dmax: 0.95, width: 0.001, middle: 0.5, power: 2.0 } }), force_mix: 1.0, density: 1000.0, friction: Py(0x7b7af4597240), condim: 3 }
+largebox_visual ShapeType.Mesh PyPhysicsMaterial { contact_model: Impedance(ImpedanceSpring { spring: StiffnessDamping { k: 2500.0, d: 100.0 }, impedance: Impedance { d0: 0.9, dmax: 0.95, width: 0.001, middle: 0.5, power: 2.0 } }), force_mix: 1.0, density: 1000.0, friction: Py(0x7b7af4597180), condim: 3 }
+MU JOINTS 43 41 MT 43 41
+GEOM 0 floor MU 0 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.InfinitePlane, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 1  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 2  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 3  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 4 pelvis_collision MU 2 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Sphere, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 5  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 6  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 7  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 8  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 9 left_thigh MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 10  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 11  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 12 left_shin MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 13  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 14  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 15 left_foot1_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 16 left_foot2_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 17 left_foot3_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 18 left_foot4_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 19 left_foot5_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 20 left_foot6_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 21 left_foot7_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 22  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 23  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 24 right_thigh MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 25  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 26  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 27 right_shin MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 28  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 29  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 30 right_foot1_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 31 right_foot2_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 32 right_foot3_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 33 right_foot4_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 34 right_foot5_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 35 right_foot6_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 36 right_foot7_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 37  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 38  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 39  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 40  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 41  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 42 torso_collision1 MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 43 torso_collision2 MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 44 torso_collision3 MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 45 head_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 46  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 47  MU 5 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 48  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 49  MU 5 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 50  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 51 left_shoulder_yaw_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 52  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 53 left_elbow_yaw_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 54  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 55  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 56  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 57  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 58 left_hand_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 59  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 60  MU 5 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 61  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 62  MU 5 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 63  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 64 right_shoulder_yaw_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 65  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 66 right_elbow_yaw_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 67  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 68  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 69  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 70  MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 0 0 MT None
+GEOM 71 right_hand_collision MU 3 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Capsule, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+GEOM 72 largebox_collision MU 7 [1.e+00 5.e-03 1.e-04] 3 [0.02 1.  ] [9.0e-01 9.5e-01 1.0e-03 5.0e-01 2.0e+00] 1 1 MT (Shape.Mesh, [1.0, 0.004999999888241291, 9.999999747378752e-05], 1, 1)
+MU BOX BOUNDS [-0.23408277 -0.23008044 -0.19819215] [0.23707144 0.22864969 0.20970333]
+OBJ BOUNDS [-0.23408277 -0.23008044 -0.19819215] [0.23707144 0.22864969 0.20970333] verts 13551

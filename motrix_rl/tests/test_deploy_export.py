@@ -73,6 +73,7 @@ def _profile() -> DeploymentProfile:
     )
 
 
+@pytest.mark.parametrize("explicit_checkpoint", [False, True])
 @pytest.mark.parametrize(
     ("input_size", "output_size", "invalid_kind"),
     [(4, 2, None), (5, 2, "input"), (4, 3, "output")],
@@ -83,6 +84,7 @@ def test_deployment_export_injects_profile_builder_selected_by_run_metadata(
     input_size: int,
     output_size: int,
     invalid_kind: str | None,
+    explicit_checkpoint: bool,
 ) -> None:
     run = runs.create_run_context(
         env_name="cartpole",
@@ -110,7 +112,16 @@ def test_deployment_export_injects_profile_builder_selected_by_run_metadata(
             parity=OnnxParityMetrics(samples=8, max_abs_error=1e-6, max_rel_error=2e-6),
         ),
     )
-    monkeypatch.setattr("motrix_rl.deploy.service.export_onnx_model", lambda *args, **kwargs: model)
+    selected_checkpoint = checkpoint
+    if explicit_checkpoint:
+        selected_checkpoint = run.checkpoint_dir / "iteration.pt"
+        selected_checkpoint.write_bytes(b"explicit policy")
+
+    def export_model(*args, **kwargs):
+        assert kwargs["checkpoint"] == selected_checkpoint
+        return model
+
+    monkeypatch.setattr("motrix_rl.deploy.service.export_onnx_model", export_model)
     selected: list[str] = []
 
     if invalid_kind is not None:
@@ -119,6 +130,7 @@ def test_deployment_export_injects_profile_builder_selected_by_run_metadata(
                 run.run_dir,
                 tmp_path / "test.deploy",
                 profile_builder=lambda env_name: selected.append(env_name) or _profile(),
+                checkpoint=selected_checkpoint if explicit_checkpoint else None,
                 validation_samples=8,
             )
         assert not (tmp_path / "test.deploy").exists()
@@ -128,9 +140,11 @@ def test_deployment_export_injects_profile_builder_selected_by_run_metadata(
         run.run_dir,
         tmp_path / "test.deploy",
         profile_builder=lambda env_name: selected.append(env_name) or _profile(),
+        checkpoint=selected_checkpoint if explicit_checkpoint else None,
         validation_samples=8,
     )
 
+    assert result.artifact.manifest.source.checkpoint == str(selected_checkpoint.relative_to(run.run_dir))
     assert selected == ["cartpole"]
     assert isinstance(result.artifact.manifest.task, TestTaskSpec)
     manifest = result.artifact.manifest.to_dict()

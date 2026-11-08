@@ -1,0 +1,17 @@
+# @package _global_
+defaults:
+  - /runtime: sim
+  - _self_
+
+artifact: ???
+runtime:
+  backend: mujoco
+  deploy_env_id: g1-largebox
+  robot_id: g1-29dof
+  sensor_bindings:
+    base_angular_velocity: base_gyro
+    base_linear_acceleration: base_accel
+    base_linear_velocity: null
+  physics:
+    dt: 0.005
+    solver_iterations: 3

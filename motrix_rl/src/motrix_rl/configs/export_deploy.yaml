@@ -12,6 +12,7 @@ hydra:
 
 env: null
 run_dir: null
+checkpoint: null
 output: null
 validation:
   seed: 1

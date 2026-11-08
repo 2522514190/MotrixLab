@@ -29,6 +29,7 @@ def export_deploy_run(
     output: str | Path,
     *,
     profile_builder: ProfileBuilder,
+    checkpoint: str | Path | None = None,
     validation_seed: int = 1,
     validation_samples: int = 32,
     atol: float = 1e-5,
@@ -40,9 +41,14 @@ def export_deploy_run(
     context = open_run_context(run_dir)
     metadata = context.metadata
     profile = profile_builder(metadata.env_name)
-    checkpoint_path = checkpoints.best_policy(metadata, context.run_dir)
+    checkpoint_path = (
+        checkpoints.resolve_checkpoint_path(checkpoint, metadata=metadata)
+        if checkpoint is not None
+        else checkpoints.best_policy(metadata, context.run_dir)
+    )
     exported = export_onnx_model(
         context.run_dir,
+        checkpoint=checkpoint_path,
         validation_seed=validation_seed,
         validation_samples=validation_samples,
         atol=atol,

@@ -3,6 +3,7 @@
 
 """Simulator-independent deployment scene and state-source configuration."""
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -40,6 +41,41 @@ class SensorBindings:
 
 
 @dataclass(frozen=True)
+class FloatingBodyState:
+    """Initial world pose (xyzw) and world linear/angular velocities."""
+
+    position: tuple[float, float, float]
+    quaternion_xyzw: tuple[float, float, float, float]
+    linear_velocity: tuple[float, float, float]
+    angular_velocity: tuple[float, float, float]
+
+    def __post_init__(self) -> None:
+        for name, size in (("position", 3), ("quaternion_xyzw", 4), ("linear_velocity", 3), ("angular_velocity", 3)):
+            values = getattr(self, name)
+            if len(values) != size or not all(math.isfinite(value) for value in values):
+                raise ValueError(f"initial_state.{name} must contain {size} finite values")
+        if not math.isclose(sum(value * value for value in self.quaternion_xyzw), 1.0, abs_tol=1e-5):
+            raise ValueError("initial_state.quaternion_xyzw must be a unit quaternion")
+
+
+@dataclass(frozen=True)
+class SimulationInitialState:
+    """Task-owned initial state, with joints and floating bodies addressed by name."""
+
+    bodies: Mapping[str, FloatingBodyState]
+    joint_positions: Mapping[str, float]
+    joint_velocities: Mapping[str, float]
+
+    def __post_init__(self) -> None:
+        if not all(
+            math.isfinite(value)
+            for values in (self.joint_positions, self.joint_velocities)
+            for value in values.values()
+        ):
+            raise ValueError("initial_state joint values must be finite")
+
+
+@dataclass(frozen=True)
 class SimulationRuntimeConfig:
     scene: SceneCfg
     physics: SimCfg = field(default_factory=lambda: SimCfg(dt=0.002, solver_iterations=100))
@@ -47,6 +83,7 @@ class SimulationRuntimeConfig:
     realtime: bool | None = None
     # Deployment recipe: semantic RobotState fields mapped to model-local sensor names.
     sensor_bindings: SensorBindings = field(default_factory=SensorBindings)
+    initial_state: SimulationInitialState | None = None
 
     def __post_init__(self) -> None:
         self.physics.validate()
