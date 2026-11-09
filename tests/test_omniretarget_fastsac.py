@@ -108,7 +108,7 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
         assert env.cfg.max_episode_steps == 800
         assert env.cfg.object_curriculum.reference_frames == 745
         assert env.command_terms["motion"].clip.joint_pos.shape[0] == 745
-        assert env.cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_unilab_grounded_smooth_745.npz")
+        assert env.cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_upright_feet_fixed_smooth_745.npz")
         assert not env._gate.enabled[0]
         indices = env._box_weight_indices
         np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.5)
