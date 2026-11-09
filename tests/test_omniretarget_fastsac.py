@@ -182,6 +182,69 @@ def test_carry_ablation_configs_control_sampling_and_error_gate():
             del env
 
 
+
+@pytest.mark.numba
+@pytest.mark.parametrize(
+    ("suffix", "decay_start", "fixed_orientation", "should_decay_at_65"),
+    [
+        ("reward05-80", 0.8, False, False),
+        ("reward05-50", 0.5, False, True),
+        ("reward05-50-orifixed", 0.5, True, True),
+    ],
+)
+def test_box_reward_ablation_variants_are_isolated_and_write_independent_weights(
+    suffix, decay_start, fixed_orientation, should_decay_at_65
+):
+    spec = registry.resolve(f"g1-29dof-wbt-largebox-omniretarget-fastsac-{suffix}")
+    env = spec.make(num_envs=2, seed=41)
+    try:
+        env.init_state()
+        cfg = env.cfg
+        assert cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_upright_start_end_hold_745.npz")
+        assert cfg.object_curriculum.reference_frames == 745
+        assert cfg.commands.motion.adaptive_sampling_enabled
+        assert cfg.commands.motion.start_at_timestep_zero_prob == pytest.approx(0.3)
+        assert cfg.object_curriculum.from_zero_only
+        assert cfg.object_curriculum.error_termination_enabled
+        assert cfg.rewards.undesired_contacts.weight == pytest.approx(0.0)
+        assert cfg.rewards.object_global_ref_position_error_exp.weight == pytest.approx(0.5)
+        assert cfg.rewards.object_global_ref_orientation_error_exp.weight == pytest.approx(0.5)
+        assert not env._gate.enabled[0]
+        assert env._BOX_REWARD_DECAY_START == pytest.approx(decay_start)
+        assert env._BOX_REWARD_DECAY_END == pytest.approx(0.95)
+        assert env._BOX_REWARD_INITIAL_WEIGHT == pytest.approx(0.5)
+        assert env._BOX_REWARD_MIN_WEIGHT == pytest.approx(0.2)
+        assert (env._BOX_ORIENTATION_FIXED_WEIGHT is not None) is fixed_orientation
+
+        position_idx, orientation_idx = env._box_weight_indices
+        weights = env._task_program.reward_weights
+        np.testing.assert_allclose(weights[[position_idx, orientation_idx]], 0.5)
+        assert env.state.metrics["box_position_reward_weight"] == pytest.approx(0.5)
+        assert env.state.metrics["box_orientation_reward_weight"] == pytest.approx(0.5)
+
+        # Hold the survival ratio near 65% to isolate the onset change:
+        # 80%-start must not decay, 50%-start must decay.
+        env._box_curriculum_ema = 0.65
+        env._elapsed_since_reset[:] = int(round(0.65 * 745))
+        for _ in range(12):
+            env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
+        assert (env._box_reward_weight < 0.5) is should_decay_at_65
+
+        # Both dynamic variants eventually decay, but the third variant's
+        # orientation stays at 0.5 in the *compiled* reward weights.
+        env._box_curriculum_ema = 0.90
+        env._elapsed_since_reset[:] = int(round(0.90 * 745))
+        for _ in range(12):
+            env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
+        assert 0.2 <= env._box_reward_weight < 0.5
+        env._apply_box_reward_weights(env._box_reward_weight)
+        assert weights[position_idx] == pytest.approx(env._box_reward_weight)
+        expected_orientation = 0.5 if fixed_orientation else env._box_reward_weight
+        assert weights[orientation_idx] == pytest.approx(expected_orientation)
+    finally:
+        del env
+
+
 @pytest.mark.numba
 def test_unilab_full_start_bonus_is_ten_once_and_not_dt_scaled():
     """Test host-side success injection while keeping unrelated termination checks isolated."""
