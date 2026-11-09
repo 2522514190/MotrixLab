@@ -20,7 +20,7 @@ def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
     """Build the common FastSAC carrying task configuration."""
     cfg = make_omniretarget_cfg()
     # FastSAC-only trajectory swap: leave the shared PPO recipe untouched.
-    motion_path = MOTION_DIR / "sub3_largebox_003_upright_feet_fixed_smooth_745.npz"
+    motion_path = MOTION_DIR / "sub3_largebox_003_upright_start_end_hold_745.npz"
     if not motion_path.is_file():
         raise FileNotFoundError(
             f"Unilab carrying motion not found: {motion_path}. "
