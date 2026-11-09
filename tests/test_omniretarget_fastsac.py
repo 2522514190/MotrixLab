@@ -337,8 +337,17 @@ def test_reward05_80_fixed_30k_object_termination_gate_and_thresholds():
 
         env.set_training_iteration(29_999)
         assert not bool(env._gate.enabled[0])
+        env._refresh_sim_reads()
+        env._execute_evaluate_kernel(env._kernel_inputs)
+        np.testing.assert_allclose(env.state.metrics["object_termination_enabled"], 0.0)
+
         env.set_training_iteration(30_000)
         assert bool(env._gate.enabled[0])
+        env._refresh_sim_reads()
+        env._execute_evaluate_kernel(env._kernel_inputs)
+        # Check the actual compiled termination kernel, not just the Python
+        # gate flag; this catches the earlier reported never-enabled behavior.
+        np.testing.assert_allclose(env.state.metrics["object_termination_enabled"], 1.0)
         env.set_training_iteration(50_000)
         assert bool(env._gate.enabled[0])
 
