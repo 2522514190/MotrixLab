@@ -66,6 +66,13 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
 
     _CURRICULUM_ALPHA = 1.0 / 256.0
     _WEIGHT_SMOOTHING_ALPHA = 0.1
+    # Experiment-specific reward curriculum (existing 0.8 -> 0.2 is the default).
+    _BOX_REWARD_INITIAL_WEIGHT = 0.8
+    _BOX_REWARD_MIN_WEIGHT = 0.2
+    _BOX_REWARD_DECAY_START = 0.8
+    _BOX_REWARD_DECAY_END = 0.95
+    # None = orientation follows position; a float = independent fixed weight.
+    _BOX_ORIENTATION_FIXED_WEIGHT: float | None = None
     # Full-start completion requires sustained reference-aligned lifting, then stable setdown.
     # These checks rely on box height/velocity (not contact-pair sensing).
     _BOX_LIFT_HEIGHT_M = 0.25
@@ -93,7 +100,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         self._box_setdown_streak = np.zeros(num_envs, dtype=np.int32)
         self._box_setdown_verified = np.zeros(num_envs, dtype=bool)
         self._box_success_total = 0
-        self._box_reward_weight = np.float32(0.8)
+        self._box_reward_weight = np.float32(self._BOX_REWARD_INITIAL_WEIGHT)
         self._box_curriculum_survival_ratio = np.float32(0.0)
         self._box_curriculum_enabled = False
         self._box_curriculum_trigger_iteration = -1
@@ -139,11 +146,19 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
             survival_ratio = float(np.mean(observed)) if observed.size else self._box_curriculum_ema
         else:
             survival_ratio = self._box_curriculum_ema
-        target = 0.8 - 0.6 * np.clip((survival_ratio - 0.8) / 0.15, 0.0, 1.0)
-        target = max(target, 0.2)
+        progress = np.clip(
+            (survival_ratio - self._BOX_REWARD_DECAY_START)
+            / (self._BOX_REWARD_DECAY_END - self._BOX_REWARD_DECAY_START),
+            0.0,
+            1.0,
+        )
+        target = self._BOX_REWARD_INITIAL_WEIGHT - (
+            self._BOX_REWARD_INITIAL_WEIGHT - self._BOX_REWARD_MIN_WEIGHT
+        ) * progress
+        target = max(target, self._BOX_REWARD_MIN_WEIGHT)
         current = float(self._box_reward_weight)
         smoothed = current + self._WEIGHT_SMOOTHING_ALPHA * (target - current)
-        self._box_reward_weight = np.float32(max(0.2, min(current, smoothed)))
+        self._box_reward_weight = np.float32(max(self._BOX_REWARD_MIN_WEIGHT, min(current, smoothed)))
         if self._box_curriculum_state is not None:
             row[2] = self._box_reward_weight
             synchronized = self._synchronized_weight()
@@ -151,12 +166,24 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
                 self._box_reward_weight = synchronized
         previous_enabled = self._box_curriculum_enabled
         self._box_curriculum_survival_ratio = np.float32(survival_ratio)
-        self._box_curriculum_enabled = self._box_reward_weight < 0.8
+        self._box_curriculum_enabled = self._box_reward_weight < self._BOX_REWARD_INITIAL_WEIGHT
         if self._box_curriculum_enabled and not previous_enabled:
             self._box_curriculum_trigger_iteration = self._training_iteration
 
     def _on_full_start_episodes_finished(self, env_ids):
         self._update_curriculum_from_finished(env_ids)
+
+    def _orientation_reward_weight(self, position_weight: float) -> np.float32:
+        if self._BOX_ORIENTATION_FIXED_WEIGHT is not None:
+            return np.float32(self._BOX_ORIENTATION_FIXED_WEIGHT)
+        return np.float32(position_weight)
+
+    def _apply_box_reward_weights(self, position_weight: float) -> None:
+        if self._box_weight_indices is None:
+            return
+        position_index, orientation_index = self._box_weight_indices
+        self._task_program.reward_weights[position_index] = position_weight
+        self._task_program.reward_weights[orientation_index] = self._orientation_reward_weight(position_weight)
 
     def init_state(self):
         state = super().init_state()
@@ -168,12 +195,14 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
                 "object_global_ref_orientation_error_exp",
             )
         )
-        self._task_program.reward_weights[list(self._box_weight_indices)] = self._box_reward_weight
+        self._apply_box_reward_weights(self._box_reward_weight)
         state.reward_terms["box_success_bonus"] = self._box_success_bonus
         state.metrics["box_success"] = self._box_success_mask
         state.metrics["box_lift_verified"] = self._box_lift_verified
         state.metrics["box_setdown_verified"] = self._box_setdown_verified
         state.metrics["box_reward_weight"] = float(self._box_reward_weight)
+        state.metrics["box_position_reward_weight"] = float(self._box_reward_weight)
+        state.metrics["box_orientation_reward_weight"] = float(self._orientation_reward_weight(self._box_reward_weight))
         state.metrics["box_curriculum_survival_ratio"] = float(self._box_curriculum_survival_ratio)
         state.metrics["box_curriculum_enabled"] = self._box_curriculum_enabled
         state.metrics["box_curriculum_trigger_iteration"] = float(self._box_curriculum_trigger_iteration)
@@ -224,8 +253,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
     def compute_transition(self, state):
         weight = self._synchronized_weight()
         self._box_reward_weight = weight
-        if self._box_weight_indices is not None:
-            self._task_program.reward_weights[list(self._box_weight_indices)] = weight
+        self._apply_box_reward_weights(weight)
         state = super().compute_transition(state)
         self._box_success_bonus.fill(0.0)
         self._box_success_mask.fill(False)
@@ -256,6 +284,8 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         state.reward[:] += self._box_success_bonus
         state.terminated[reached_end] = True
         state.metrics["box_reward_weight"] = float(weight)
+        state.metrics["box_position_reward_weight"] = float(weight)
+        state.metrics["box_orientation_reward_weight"] = float(self._orientation_reward_weight(weight))
         state.metrics["box_curriculum_survival_ratio"] = float(self._box_curriculum_survival_ratio)
         state.metrics["box_curriculum_enabled"] = self._box_curriculum_enabled
         state.metrics["box_curriculum_trigger_iteration"] = float(self._box_curriculum_trigger_iteration)
@@ -305,3 +335,51 @@ def make_h_cfg() -> OmniRetargetEnvCfg:
 
 for _suffix in "abcdefgh":
     registry.env(f"g1-29dof-wbt-largebox-omniretarget-fastsac-{_suffix}")(OmniRetargetFastSacEnv)
+
+
+# Three reward ablations use identical FastSAC / contact / termination settings.
+# Fix the contact penalty to B (0.0); only the named box-reward dimension varies.
+def _make_box_reward_ablation_cfg() -> OmniRetargetEnvCfg:
+    cfg = _make_ablation_cfg(undesired_contact_weight=0.0, error_termination=True, adaptive_sampling=True)
+    cfg.rewards.object_global_ref_position_error_exp.weight = 0.5
+    cfg.rewards.object_global_ref_orientation_error_exp.weight = 0.5
+    return cfg
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-80")
+def make_box_reward05_80_cfg() -> OmniRetargetEnvCfg:
+    """Ablation 1: both box rewards 0.5 -> 0.2 over 80%-95% survival."""
+    return _make_box_reward_ablation_cfg()
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50")
+def make_box_reward05_50_cfg() -> OmniRetargetEnvCfg:
+    """Ablation 2: both box rewards 0.5 -> 0.2 over 50%-95% survival."""
+    return _make_box_reward_ablation_cfg()
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-orifixed")
+def make_box_reward05_50_orifixed_cfg() -> OmniRetargetEnvCfg:
+    """Ablation 3: position 0.5 -> 0.2 over 50%-95%, orientation fixed at 0.5."""
+    return _make_box_reward_ablation_cfg()
+
+
+class OmniRetargetReward05_80Env(OmniRetargetFastSacEnv):
+    _BOX_REWARD_INITIAL_WEIGHT = 0.5
+    _BOX_REWARD_DECAY_START = 0.8
+
+
+class OmniRetargetReward05_50Env(OmniRetargetFastSacEnv):
+    _BOX_REWARD_INITIAL_WEIGHT = 0.5
+    _BOX_REWARD_DECAY_START = 0.5
+
+
+class OmniRetargetReward05_50OriFixedEnv(OmniRetargetReward05_50Env):
+    _BOX_ORIENTATION_FIXED_WEIGHT = 0.5
+
+
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-80")(OmniRetargetReward05_80Env)
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50")(OmniRetargetReward05_50Env)
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-orifixed")(
+    OmniRetargetReward05_50OriFixedEnv
+)
