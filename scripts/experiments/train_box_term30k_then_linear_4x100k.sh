@@ -48,13 +48,8 @@ if ! flock -n 9; then
   echo "ERROR: another four-ablation launcher is running" >&2
   exit 1
 fi
-# Prevent duplicate launching of the original three-linear-only runner.
-if [[ -f runs/.box_reward_linear_3ablations_100k.lock ]] && \
-   ! flock -n 8 8>runs/.box_reward_linear_3ablations_100k.lock; then
-  echo "ERROR: previous linear-only runner already has the GPU" >&2
-  exit 1
-fi
-# Hold both locks until all four jobs exit.
+# Hold the original linear-runner lock too, preventing the old queued
+# linear-only runner from launching concurrently with this four-stage run.
 exec 8>runs/.box_reward_linear_3ablations_100k.lock
 if ! flock -n 8; then
   echo "ERROR: linear-only runner is active" >&2
