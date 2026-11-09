@@ -45,8 +45,8 @@ def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
     cfg.commands.motion.start_at_timestep_zero_prob = 0.3
     cfg.object_curriculum.from_zero_only = True
     cfg.randomize_initial_episode_progress = False
-    cfg.rewards.object_global_ref_position_error_exp.weight = 0.5
-    cfg.rewards.object_global_ref_orientation_error_exp.weight = 0.5
+    cfg.rewards.object_global_ref_position_error_exp.weight = 0.8
+    cfg.rewards.object_global_ref_orientation_error_exp.weight = 0.8
     return cfg
 
 
@@ -66,6 +66,14 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
 
     _CURRICULUM_ALPHA = 1.0 / 256.0
     _WEIGHT_SMOOTHING_ALPHA = 0.1
+    # Full-start completion requires sustained reference-aligned lifting, then stable setdown.
+    # These checks rely on box height/velocity (not contact-pair sensing).
+    _BOX_LIFT_HEIGHT_M = 0.25
+    _BOX_LIFT_TRACKING_TOL_M = 0.20
+    _BOX_LIFT_HOLD_STEPS = 25  # 0.5 s at 50 Hz
+    _BOX_SETDOWN_HEIGHT_M = 0.08
+    _BOX_SETDOWN_MAX_SPEED_MPS = 0.20
+    _BOX_SETDOWN_HOLD_STEPS = 15  # 0.3 s at 50 Hz
 
     def __init__(self, cfg: OmniRetargetEnvCfg, num_envs=1, backend=None, seed=None):
         super().__init__(cfg, num_envs=num_envs, backend=backend, seed=seed)
@@ -80,8 +88,12 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         self._box_success_bonus = np.zeros(num_envs, dtype=np.float32)
         self._box_success_mask = np.zeros(num_envs, dtype=bool)
         self._box_success_counted = np.zeros(num_envs, dtype=bool)
+        self._box_lift_streak = np.zeros(num_envs, dtype=np.int32)
+        self._box_lift_verified = np.zeros(num_envs, dtype=bool)
+        self._box_setdown_streak = np.zeros(num_envs, dtype=np.int32)
+        self._box_setdown_verified = np.zeros(num_envs, dtype=bool)
         self._box_success_total = 0
-        self._box_reward_weight = np.float32(0.5)
+        self._box_reward_weight = np.float32(0.8)
         self._box_curriculum_survival_ratio = np.float32(0.0)
         self._box_curriculum_enabled = False
         self._box_curriculum_trigger_iteration = -1
@@ -127,7 +139,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
             survival_ratio = float(np.mean(observed)) if observed.size else self._box_curriculum_ema
         else:
             survival_ratio = self._box_curriculum_ema
-        target = 0.5 - 0.3 * np.clip((survival_ratio - 0.8) / 0.15, 0.0, 1.0)
+        target = 0.8 - 0.6 * np.clip((survival_ratio - 0.8) / 0.15, 0.0, 1.0)
         target = max(target, 0.2)
         current = float(self._box_reward_weight)
         smoothed = current + self._WEIGHT_SMOOTHING_ALPHA * (target - current)
@@ -139,7 +151,7 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
                 self._box_reward_weight = synchronized
         previous_enabled = self._box_curriculum_enabled
         self._box_curriculum_survival_ratio = np.float32(survival_ratio)
-        self._box_curriculum_enabled = self._box_reward_weight < 0.5
+        self._box_curriculum_enabled = self._box_reward_weight < 0.8
         if self._box_curriculum_enabled and not previous_enabled:
             self._box_curriculum_trigger_iteration = self._training_iteration
 
@@ -159,6 +171,8 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         self._task_program.reward_weights[list(self._box_weight_indices)] = self._box_reward_weight
         state.reward_terms["box_success_bonus"] = self._box_success_bonus
         state.metrics["box_success"] = self._box_success_mask
+        state.metrics["box_lift_verified"] = self._box_lift_verified
+        state.metrics["box_setdown_verified"] = self._box_setdown_verified
         state.metrics["box_reward_weight"] = float(self._box_reward_weight)
         state.metrics["box_curriculum_survival_ratio"] = float(self._box_curriculum_survival_ratio)
         state.metrics["box_curriculum_enabled"] = self._box_curriculum_enabled
@@ -171,6 +185,41 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         super().reset(env_ids, sim_reset_ids)
         if env_ids.size:
             self._box_success_counted[env_ids] = False
+            self._box_lift_streak[env_ids] = 0
+            self._box_lift_verified[env_ids] = False
+            self._box_setdown_streak[env_ids] = 0
+            self._box_setdown_verified[env_ids] = False
+
+    def _track_box_lift_and_setdown(self, motion, object_pos: np.ndarray, object_vel: np.ndarray) -> None:
+        """Record a full-start episode's sustained lift followed by stable placement."""
+        reference = motion.clip.extensions["object_pos_w"].data
+        frame_indices = np.clip(motion.steps[:, 0], 0, len(reference) - 1)
+        reference_pos = reference[frame_indices]
+        floor_z = float(reference[0, 2])
+        tracking_error = np.linalg.norm(object_pos - reference_pos, axis=1)
+
+        # A brief kick or one-frame airborne event does not satisfy the lift stage.
+        lifted_now = (
+            self._started_from_zero
+            & ~self._box_lift_verified
+            & (reference_pos[:, 2] >= floor_z + self._BOX_LIFT_HEIGHT_M)
+            & (object_pos[:, 2] >= floor_z + self._BOX_LIFT_HEIGHT_M)
+            & (tracking_error <= self._BOX_LIFT_TRACKING_TOL_M)
+        )
+        self._box_lift_streak[:] = np.where(lifted_now, self._box_lift_streak + 1, 0)
+        self._box_lift_verified |= self._box_lift_streak >= self._BOX_LIFT_HOLD_STEPS
+
+        placed_now = (
+            self._started_from_zero
+            & self._box_lift_verified
+            & ~self._box_setdown_verified
+            & (reference_pos[:, 2] <= floor_z + self._BOX_SETDOWN_HEIGHT_M)
+            & (abs(object_pos[:, 2] - floor_z) <= self._BOX_SETDOWN_HEIGHT_M)
+            & (tracking_error <= self._BOX_LIFT_TRACKING_TOL_M)
+            & (np.linalg.norm(object_vel, axis=1) <= self._BOX_SETDOWN_MAX_SPEED_MPS)
+        )
+        self._box_setdown_streak[:] = np.where(placed_now, self._box_setdown_streak + 1, 0)
+        self._box_setdown_verified |= self._box_setdown_streak >= self._BOX_SETDOWN_HOLD_STEPS
 
     def compute_transition(self, state):
         weight = self._synchronized_weight()
@@ -182,6 +231,8 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         self._box_success_mask.fill(False)
         motion = self.command_terms["motion"]
         object_pos = self._compiled_manager_program.read_plan.sim_data.view("object_pos")
+        object_vel = self._compiled_manager_program.read_plan.sim_data.view("object_lin_vel")
+        self._track_box_lift_and_setdown(motion, object_pos, object_vel)
         object_quat = self._compiled_manager_program.read_plan.sim_data.view("object_quat")
         reference_pos = motion.clip.extensions["object_pos_w"].data[-1]
         reference_quat = motion.clip.extensions["object_quat_w"].data[-1]
@@ -190,7 +241,14 @@ class OmniRetargetFastSacEnv(OmniRetargetEnv):
         quat_den = np.maximum(np.linalg.norm(object_quat, axis=1) * np.linalg.norm(reference_quat), 1e-8)
         ori_error = 2.0 * np.arccos(np.clip(np.abs(quat_dot) / quat_den, 0.0, 1.0))
         reached_end = self._started_from_zero & motion.clip_ended[:, 0] & ~self._box_success_counted
-        success = reached_end & (pos_error < 0.15) & (ori_error < 0.30) & ~state.terminated
+        success = (
+            reached_end
+            & self._box_lift_verified
+            & self._box_setdown_verified
+            & (pos_error < 0.15)
+            & (ori_error < 0.30)
+            & ~state.terminated
+        )
         self._box_success_bonus[success] = 10.0
         self._box_success_mask[success] = True
         self._box_success_counted[reached_end] = True
