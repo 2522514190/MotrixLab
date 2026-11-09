@@ -302,6 +302,72 @@ def test_linear_iteration_box_rewards_are_exact_and_independent_of_survival(suff
         del env
 
 
+
+@pytest.mark.numba
+def test_reward05_80_fixed_30k_object_termination_gate_and_thresholds():
+    """The ONLY change from reward05-80 is a forced gate at 30k and angle=0.8."""
+    from unittest.mock import patch
+
+    from motrix_envs.locomotion.wbt.g1.omniretarget_fastsac import (
+        OmniRetargetReward05_80Env,
+        OmniRetargetReward05_80Term30kEnv,
+    )
+
+    name = "g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-80-term30k"
+    env = registry.resolve(name).make(num_envs=2, seed=47)
+    try:
+        env.init_state()
+        cfg = env.cfg
+        assert isinstance(env, OmniRetargetReward05_80Term30kEnv)
+        assert cfg.rewards.object_global_ref_position_error_exp.weight == pytest.approx(0.5)
+        assert cfg.rewards.object_global_ref_orientation_error_exp.weight == pytest.approx(0.5)
+        assert env._BOX_REWARD_DECAY_START == pytest.approx(0.8)
+        assert env._BOX_REWARD_DECAY_END == pytest.approx(0.95)
+        assert env._BOX_REWARD_MIN_WEIGHT == pytest.approx(0.2)
+        assert cfg.rewards.undesired_contacts.weight == pytest.approx(0.0)
+        assert cfg.object_curriculum.error_termination_enabled
+        assert cfg.commands.motion.adaptive_sampling_enabled
+        assert cfg.commands.motion.start_at_timestep_zero_prob == pytest.approx(0.3)
+        assert cfg.object_curriculum.from_zero_only
+        assert cfg.object_curriculum.reference_frames == 745
+        assert cfg.terminations.object_tracking.position == pytest.approx(1.0)
+        assert cfg.terminations.object_tracking.angle == pytest.approx(0.8)
+        assert env._BOX_TERMINATION_ENABLE_ITERATION == 30_000
+        assert not bool(env._gate.enabled[0])
+
+        env.set_training_iteration(29_999)
+        assert not bool(env._gate.enabled[0])
+        env.set_training_iteration(30_000)
+        assert bool(env._gate.enabled[0])
+        env.set_training_iteration(50_000)
+        assert bool(env._gate.enabled[0])
+
+        # Guard against the parent reset() enabling the survival-based gate
+        # prematurely: subclass must override it at every reset.
+        env.set_training_iteration(29_999)
+        with patch.object(
+            OmniRetargetReward05_80Env,
+            "reset",
+            autospec=True,
+            side_effect=lambda obj, env_ids, sim_reset_ids=None: obj._gate.enabled.__setitem__(0, True),
+        ):
+            env.reset(np.array([0], dtype=np.int64))
+        assert not bool(env._gate.enabled[0])
+
+        # The fixed gate remains on through later resets regardless of EMA.
+        env.set_training_iteration(30_000)
+        with patch.object(
+            OmniRetargetReward05_80Env,
+            "reset",
+            autospec=True,
+            side_effect=lambda obj, env_ids, sim_reset_ids=None: obj._gate.enabled.__setitem__(0, False),
+        ):
+            env.reset(np.array([0], dtype=np.int64))
+        assert bool(env._gate.enabled[0])
+    finally:
+        del env
+
+
 @pytest.mark.numba
 def test_unilab_full_start_bonus_is_ten_once_and_not_dt_scaled():
     """Test host-side success injection while keeping unrelated termination checks isolated."""
