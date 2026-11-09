@@ -9,11 +9,29 @@ set -Eeuo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
+EXPECTED_BRANCH="codex/fastsac-box-reward-3ablations-100k"
+ACTUAL_BRANCH="$(git branch --show-current)"
+if [[ "$ACTUAL_BRANCH" != "$EXPECTED_BRANCH" ]]; then
+  echo "ERROR: expected Git branch $EXPECTED_BRANCH, got $ACTUAL_BRANCH" >&2
+  exit 1
+fi
+
 MOTION="motrix_envs/src/motrix_envs/locomotion/wbt/assets/motion/g1/sub3_largebox_003_upright_start_end_hold_745.npz"
 if [[ ! -f "$MOTION" ]]; then
   echo "ERROR: missing 745-frame reference NPZ: $MOTION" >&2
   exit 1
 fi
+uv run python - "$MOTION" <<'PY'
+import sys
+import numpy as np
+
+with np.load(sys.argv[1], allow_pickle=False) as clip:
+    frames = int(clip["num_frames"])
+    fps = int(clip["fps"])
+    assert (frames, fps) == (745, 50), (frames, fps)
+    assert np.isfinite(clip["joint_pos"]).all(), "Non-finite reference joint positions"
+print(f"Reference OK: {frames} frames at {fps} Hz")
+PY
 
 mkdir -p runs
 # Prevent two copies of the overnight ablation runner from sharing one GPU.
