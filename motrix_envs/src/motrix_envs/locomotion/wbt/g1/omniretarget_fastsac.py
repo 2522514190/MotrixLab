@@ -383,3 +383,104 @@ registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50")(OmniRetar
 registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-orifixed")(
     OmniRetargetReward05_50OriFixedEnv
 )
+
+
+# Iteration-scheduled reward ablations: unlike the three survival-scheduled
+# variants above, these rewards decline linearly across 100,000 collector
+# iterations. The object-error termination gate still follows survival at 80%.
+def _make_box_linear_ablation_cfg(initial_weight: float) -> OmniRetargetEnvCfg:
+    cfg = _make_ablation_cfg(undesired_contact_weight=0.0, error_termination=True, adaptive_sampling=True)
+    cfg.rewards.object_global_ref_position_error_exp.weight = initial_weight
+    cfg.rewards.object_global_ref_orientation_error_exp.weight = initial_weight
+    return cfg
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-linear08-100k")
+def make_box_linear08_100k_cfg() -> OmniRetargetEnvCfg:
+    """Both box terms decay 0.8 -> 0.2 by collector iteration 100,000."""
+    return _make_box_linear_ablation_cfg(0.8)
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-linear05-100k")
+def make_box_linear05_100k_cfg() -> OmniRetargetEnvCfg:
+    """Both box terms decay 0.5 -> 0.2 by collector iteration 100,000."""
+    return _make_box_linear_ablation_cfg(0.5)
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-linear10-100k")
+def make_box_linear10_100k_cfg() -> OmniRetargetEnvCfg:
+    """Both box terms decay 1.0 -> 0.2 by collector iteration 100,000."""
+    return _make_box_linear_ablation_cfg(1.0)
+
+
+class OmniRetargetLinearIterationEnv(OmniRetargetFastSacEnv):
+    """Iteration-based box reward schedule, independent of episode survival.
+
+    Async FastSAC collector calls set_training_iteration once per collected
+    transition batch; one collector is configured for these experiments.
+    The strict lift-then-setdown +10 bonus and object-error gate are inherited.
+    """
+
+    _BOX_REWARD_TOTAL_ITERS = 100_000
+
+    def _synchronized_weight(self) -> np.float32:
+        # Unlike survival-driven curriculum, an iteration schedule must not
+        # be overwritten by the shared survival-curriculum weight slot.
+        return self._box_reward_weight
+
+    def set_training_iteration(self, iteration: int) -> None:
+        super().set_training_iteration(iteration)
+        progress = np.clip(float(self._training_iteration) / self._BOX_REWARD_TOTAL_ITERS, 0.0, 1.0)
+        self._box_reward_weight = np.float32(
+            self._BOX_REWARD_INITIAL_WEIGHT
+            + (self._BOX_REWARD_MIN_WEIGHT - self._BOX_REWARD_INITIAL_WEIGHT) * progress
+        )
+        previous_enabled = self._box_curriculum_enabled
+        self._box_curriculum_enabled = bool(progress > 0.0)
+        if self._box_curriculum_enabled and not previous_enabled:
+            self._box_curriculum_trigger_iteration = self._training_iteration
+        if self._box_curriculum_state is not None:
+            self._box_curriculum_state[self._box_curriculum_slot, 2] = self._box_reward_weight
+
+    def _update_curriculum_from_finished(self, env_ids: np.ndarray) -> None:
+        # Keep the survival-ratio diagnostic, but NEVER use it to change the
+        # time-based reward weights or their trigger.
+        frames = self.command_terms["motion"].clip.joint_pos.shape[0]
+        ratios = np.minimum(self._elapsed_since_reset[env_ids], frames) / frames
+        for ratio in ratios:
+            if self._box_curriculum_ema is None:
+                self._box_curriculum_ema = float(ratio)
+            else:
+                self._box_curriculum_ema = (
+                    (1.0 - self._CURRICULUM_ALPHA) * self._box_curriculum_ema
+                    + self._CURRICULUM_ALPHA * float(ratio)
+                )
+            self._box_curriculum_count += 1
+        if self._box_curriculum_state is not None:
+            row = self._box_curriculum_state[self._box_curriculum_slot]
+            row[0] = self._box_curriculum_ema
+            row[1] = self._box_curriculum_count
+            row[2] = self._box_reward_weight
+            valid = self._box_curriculum_state[:, 1] > 0.0
+            observed = self._box_curriculum_state[valid, 0]
+            survival_ratio = float(np.mean(observed)) if observed.size else self._box_curriculum_ema
+        else:
+            survival_ratio = self._box_curriculum_ema
+        self._box_curriculum_survival_ratio = np.float32(survival_ratio)
+
+
+class OmniRetargetLinear08Env(OmniRetargetLinearIterationEnv):
+    _BOX_REWARD_INITIAL_WEIGHT = 0.8
+
+
+class OmniRetargetLinear05Env(OmniRetargetLinearIterationEnv):
+    _BOX_REWARD_INITIAL_WEIGHT = 0.5
+
+
+class OmniRetargetLinear10Env(OmniRetargetLinearIterationEnv):
+    _BOX_REWARD_INITIAL_WEIGHT = 1.0
+
+
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-linear08-100k")(OmniRetargetLinear08Env)
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-linear05-100k")(OmniRetargetLinear05Env)
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-linear10-100k")(OmniRetargetLinear10Env)
