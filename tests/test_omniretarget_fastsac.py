@@ -106,25 +106,29 @@ def test_carry_curriculum_preserves_adaptive_sampling_and_updates_compiled_weigh
         assert env.cfg.object_curriculum.from_zero_only
         assert not env.cfg.randomize_initial_episode_progress
         assert env.cfg.max_episode_steps == 800
+        assert env.cfg.rewards.object_global_ref_position_error_exp.weight == pytest.approx(0.8)
+        assert env.cfg.rewards.object_global_ref_orientation_error_exp.weight == pytest.approx(0.8)
         assert env.cfg.object_curriculum.reference_frames == 745
         assert env.command_terms["motion"].clip.joint_pos.shape[0] == 745
         assert env.cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_upright_start_end_hold_745.npz")
         assert not env._gate.enabled[0]
         indices = env._box_weight_indices
-        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.5)
+        np.testing.assert_allclose(env._task_program.reward_weights[list(indices)], 0.8)
         assert "box_success_bonus" in env.state.reward_terms
         assert "box_success" in env.state.metrics
+        assert "box_lift_verified" in env.state.metrics
+        assert "box_setdown_verified" in env.state.metrics
 
         # Curriculum is performance-triggered and independent of the error gate.
         env._gate.enabled[0] = False
         env._elapsed_since_reset[:] = 100
         env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
-        assert env._box_reward_weight == pytest.approx(0.5)
+        assert env._box_reward_weight == pytest.approx(0.8)
         for _ in range(256):
             env._elapsed_since_reset[:] = env.cfg.object_curriculum.reference_frames
             env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
         assert env._box_curriculum_enabled
-        assert env._box_reward_weight < 0.5
+        assert env._box_reward_weight < 0.8
         assert env._box_reward_weight >= 0.2
         # Re-evaluate with the new weights; compare the compiled kernel's
         # weighted term against the raw term, not just the cfg value.
@@ -211,6 +215,47 @@ def test_unilab_full_start_bonus_is_ten_once_and_not_dt_scaled():
         # with body-tracking termination when the robot remains at start pose.
         with patch.object(OmniRetargetEnv, "compute_transition", lambda self, state: state):
             state = env.compute_transition(env.state)
+            # Being at the final box pose alone is not a successful carry.
+            assert state.reward_terms["box_success_bonus"][0] == pytest.approx(0.0)
+            assert not state.metrics["box_success"][0]
+            assert not env._box_lift_verified[0]
+            assert state.terminated[0]
+
+            env._box_success_counted[:] = False
+            state.terminated[:] = False
+            motion.clip_ended[0, 0] = False
+            reference = motion.clip.extensions["object_pos_w"].data
+            stopped = np.zeros((1, 3), dtype=np.float32)
+
+            # Less than 0.5 seconds in the elevated, reference-matched phase
+            # must not count as a lift.
+            for step in range(310, 334):
+                motion.steps[0, 0] = step
+                env._track_box_lift_and_setdown(motion, reference[step : step + 1], stopped)
+            assert not env._box_lift_verified[0]
+            motion.steps[0, 0] = 334
+            env._track_box_lift_and_setdown(motion, reference[334:335], stopped)
+            assert env._box_lift_verified[0]
+            assert not env._box_setdown_verified[0]
+
+            # Sustained lift without a later stable setdown still fails.
+            motion.steps[0, 0] = 744
+            motion.clip_ended[0, 0] = True
+            state = env.compute_transition(state)
+            assert state.reward_terms["box_success_bonus"][0] == pytest.approx(0.0)
+            assert not state.metrics["box_success"][0]
+
+            env._box_success_counted[:] = False
+            state.terminated[:] = False
+            motion.clip_ended[0, 0] = False
+            for step in range(645, 660):
+                motion.steps[0, 0] = step
+                env._track_box_lift_and_setdown(motion, reference[step : step + 1], stopped)
+            assert env._box_setdown_verified[0]
+
+            motion.steps[0, 0] = 744
+            motion.clip_ended[0, 0] = True
+            state = env.compute_transition(state)
             assert state.reward_terms["box_success_bonus"][0] == pytest.approx(10.0)
             assert state.reward[0] == pytest.approx(10.0)
             assert state.metrics["box_success"][0]
