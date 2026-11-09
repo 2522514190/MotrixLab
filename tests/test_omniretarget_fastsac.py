@@ -245,6 +245,63 @@ def test_box_reward_ablation_variants_are_isolated_and_write_independent_weights
         del env
 
 
+
+@pytest.mark.numba
+@pytest.mark.parametrize(
+    ("suffix", "initial"),
+    [
+        ("linear08-100k", 0.8),
+        ("linear05-100k", 0.5),
+        ("linear10-100k", 1.0),
+    ],
+)
+def test_linear_iteration_box_rewards_are_exact_and_independent_of_survival(suffix, initial):
+    name = f"g1-29dof-wbt-largebox-omniretarget-fastsac-{suffix}"
+    env = registry.resolve(name).make(num_envs=2, seed=43)
+    try:
+        env.init_state()
+        cfg = env.cfg
+        assert cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_upright_start_end_hold_745.npz")
+        assert cfg.object_curriculum.reference_frames == 745
+        assert cfg.object_curriculum.from_zero_only
+        assert cfg.object_curriculum.error_termination_enabled
+        assert cfg.object_curriculum.enable_at_horizon_fraction == pytest.approx(0.8)
+        assert cfg.commands.motion.adaptive_sampling_enabled
+        assert cfg.commands.motion.start_at_timestep_zero_prob == pytest.approx(0.3)
+        assert cfg.rewards.undesired_contacts.weight == pytest.approx(0.0)
+        assert cfg.rewards.object_global_ref_position_error_exp.weight == pytest.approx(initial)
+        assert cfg.rewards.object_global_ref_orientation_error_exp.weight == pytest.approx(initial)
+        assert env._BOX_REWARD_TOTAL_ITERS == 100_000
+        assert env._BOX_REWARD_MIN_WEIGHT == pytest.approx(0.2)
+        assert env._BOX_ORIENTATION_FIXED_WEIGHT is None
+        assert not env._gate.enabled[0]
+
+        position_idx, orientation_idx = env._box_weight_indices
+        weights = env._task_program.reward_weights
+        for iteration in (0, 25_000, 50_000, 75_000, 100_000, 120_000):
+            env.set_training_iteration(iteration)
+            fraction = min(iteration / 100_000, 1.0)
+            expected = initial + (0.2 - initial) * fraction
+            assert env._box_reward_weight == pytest.approx(expected, abs=1e-6)
+            env._apply_box_reward_weights(env._synchronized_weight())
+            np.testing.assert_allclose(weights[[position_idx, orientation_idx]], expected, atol=1e-6)
+
+        # The survival ratio may jump, but the weight must *only* reflect
+        # collector iterations. Likewise, it must not enable the object gate.
+        env.set_training_iteration(50_000)
+        before = float(env._box_reward_weight)
+        env._elapsed_since_reset[:] = 745
+        for _ in range(24):
+            env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
+        assert float(env._box_reward_weight) == pytest.approx(before)
+        assert env._box_curriculum_survival_ratio >= 0.9
+        assert not env._gate.enabled[0]
+        assert env.state.metrics["box_lift_verified"].shape == (env.num_envs,)
+        assert env.state.metrics["box_setdown_verified"].shape == (env.num_envs,)
+    finally:
+        del env
+
+
 @pytest.mark.numba
 def test_unilab_full_start_bonus_is_ten_once_and_not_dt_scaled():
     """Test host-side success injection while keeping unrelated termination checks isolated."""
