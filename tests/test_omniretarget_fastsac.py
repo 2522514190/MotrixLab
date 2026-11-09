@@ -228,7 +228,7 @@ def test_box_reward_ablation_variants_are_isolated_and_write_independent_weights
         env._elapsed_since_reset[:] = int(round(0.65 * 745))
         for _ in range(12):
             env._on_full_start_episodes_finished(np.array([0, 1], dtype=np.int64))
-        assert (env._box_reward_weight < 0.5) is should_decay_at_65
+        assert bool(env._box_reward_weight < 0.5) == should_decay_at_65
 
         # Both dynamic variants eventually decay, but the third variant's
         # orientation stays at 0.5 in the *compiled* reward weights.
