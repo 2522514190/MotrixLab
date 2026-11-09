@@ -484,3 +484,45 @@ class OmniRetargetLinear10Env(OmniRetargetLinearIterationEnv):
 registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-linear08-100k")(OmniRetargetLinear08Env)
 registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-linear05-100k")(OmniRetargetLinear05Env)
 registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-linear10-100k")(OmniRetargetLinear10Env)
+
+
+# Independent termination-gate ablation against reward05-80.
+# Unlike the survival-triggered default, the object tracking failure gate is
+# forced OFF through iteration 29,999 and ON from collector iteration 30,000.
+# Position/orientation reward weights retain the original survival curriculum.
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-80-term30k")
+def make_box_reward05_80_term30k_cfg() -> OmniRetargetEnvCfg:
+    cfg = _make_box_reward_ablation_cfg()
+    cfg.terminations.object_tracking.position = 1.0
+    cfg.terminations.object_tracking.angle = 0.8
+    return cfg
+
+
+class OmniRetargetReward05_80Term30kEnv(OmniRetargetReward05_80Env):
+    """Compare fixed-30k object-error termination with survival-based activation."""
+
+    _BOX_TERMINATION_ENABLE_ITERATION = 30_000
+
+    def _set_iteration_object_termination_gate(self) -> None:
+        # The parent reset() may turn on the survival-based object gate. For
+        # this single ablation, the global collector iteration is authoritative.
+        if hasattr(self, "_gate"):
+            self._gate.enabled[0] = (
+                getattr(self, "_training_iteration", 0) >= self._BOX_TERMINATION_ENABLE_ITERATION
+            )
+
+    def set_training_iteration(self, iteration: int) -> None:
+        super().set_training_iteration(iteration)
+        self._set_iteration_object_termination_gate()
+
+    def reset(self, env_ids, sim_reset_ids=None):
+        result = super().reset(env_ids, sim_reset_ids)
+        # The shared parent may latch the gate when its survival EMA rises;
+        # override that AFTER reset to avoid premature activation before 30k.
+        self._set_iteration_object_termination_gate()
+        return result
+
+
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-80-term30k")(
+    OmniRetargetReward05_80Term30kEnv
+)
