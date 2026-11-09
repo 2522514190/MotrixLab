@@ -68,5 +68,10 @@ if [[ "$(git rev-parse HEAD)" != "$EXPECTED_SHA" ]]; then
   exit 1
 fi
 
-echo "[$(date -Is)] Starting linear iteration reward experiments at commit $EXPECTED_SHA"
+echo "[$(date -Is)] Validating follow-on experiment code at commit $EXPECTED_SHA"
+python -m py_compile motrix_envs/src/motrix_envs/locomotion/wbt/g1/omniretarget_fastsac.py
+bash -n scripts/experiments/train_box_reward_linear_3ablations_100k.sh
+uv run python -m pytest -q tests/test_omniretarget_fastsac.py \
+  2>&1 | tee "$PRIOR_RUN_DIR/linear_followon_tests.log"
+echo "[$(date -Is)] Tests passed. Starting linear iteration reward experiments."
 PRIOR_RUN_DIR="$PRIOR_RUN_DIR" bash scripts/experiments/train_box_reward_linear_3ablations_100k.sh
