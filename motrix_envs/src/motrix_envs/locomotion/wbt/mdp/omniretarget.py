@@ -35,13 +35,16 @@ class CalibratedActionState(JointPositionActionState):
 
 
 class CalibratedActionTerm(JointPositionActionTerm):
-    def __init__(self, action_space, state, safety_clip_fraction: float):
+    def __init__(self, action_space, state, safety_clip_fraction: float, clip_target: bool = True):
         super().__init__(action_space, state)
         self._safety_clip_fraction = np.float32(safety_clip_fraction)
+        self._clip_target = bool(clip_target)
 
     def _process(self, actions: np.ndarray) -> np.ndarray:
         state = self.state
         target = super()._process(actions) + state.bias
+        if not self._clip_target:
+            return target
         midpoint = (state.joint_lower + state.joint_upper) * 0.5
         half_range = (state.joint_upper - state.joint_lower) * (0.5 * self._safety_clip_fraction)
         return np.clip(target, midpoint - half_range, midpoint + half_range)
@@ -52,6 +55,9 @@ class CalibratedActionCfg(JointPositionActionCfg):
     """Calibration bias affects both PD setpoints and joint observations (BM S1)."""
 
     safety_clip_fraction: float = 1.0
+    # Opt out only for explicitly configured ablations; legacy recipes retain
+    # the calibrated safety clipping on their PD position setpoints.
+    clip_target: bool = True
 
     def __call__(self, env, actuators):
         if not 0.0 < self.safety_clip_fraction <= 1.0:
@@ -61,7 +67,7 @@ class CalibratedActionCfg(JointPositionActionCfg):
             **{item.name: getattr(base.state, item.name) for item in fields(JointPositionActionState)},
             bias=np.zeros((env.num_envs, base.action_space.shape[0]), dtype=np.float32),
         )
-        return CalibratedActionTerm(base.action_space, state, self.safety_clip_fraction)
+        return CalibratedActionTerm(base.action_space, state, self.safety_clip_fraction, self.clip_target)
 
 
 @kernel_data
