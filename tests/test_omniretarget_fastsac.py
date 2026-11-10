@@ -377,6 +377,81 @@ def test_reward05_80_fixed_30k_object_termination_gate_and_thresholds():
         del env
 
 
+
+@pytest.mark.numba
+def test_reward05_50_bimanual_contact_isolated_from_existing_ablation():
+    name = "g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-bimanual"
+    env = registry.resolve(name).make(num_envs=2, seed=59)
+    try:
+        env.init_state()
+        cfg = env.cfg
+        assert cfg.commands.motion.motion_files[0].endswith("sub3_largebox_003_upright_start_end_hold_745.npz")
+        assert cfg.commands.motion.adaptive_sampling_enabled
+        assert cfg.object_curriculum.from_zero_only
+        assert cfg.object_curriculum.error_termination_enabled
+        assert cfg.rewards.undesired_contacts.weight == pytest.approx(0.0)
+        assert cfg.rewards.object_global_ref_position_error_exp.weight == pytest.approx(0.5)
+        assert cfg.rewards.object_global_ref_orientation_error_exp.weight == pytest.approx(0.5)
+        assert env._BOX_REWARD_INITIAL_WEIGHT == pytest.approx(0.5)
+        assert env._BOX_REWARD_MIN_WEIGHT == pytest.approx(0.2)
+        assert env._BOX_REWARD_DECAY_START == pytest.approx(0.5)
+        assert env._BOX_REWARD_DECAY_END == pytest.approx(0.95)
+        assert env._BOX_ORIENTATION_FIXED_WEIGHT is None
+        assert cfg.actions.joint_position.clip_target is False
+
+        # Confirm the sim backend can compile two named geom collision pairs.
+        contact = env._compiled_manager_program.read_plan.sim_data.view("hand_box_contacts")
+        assert contact.shape == (env.num_envs, 2)
+        assert "box_bimanual_contact_reward" in env.state.reward_terms
+        assert "box_bimanual_contact" in env.state.metrics
+        assert "box_bimanual_phase" in env.state.metrics
+
+        # Finite FastSAC actor actions remain bounded, but no *extra* PD
+        # target clamp is allowed in this single experimental environment.
+        term = env.action_terms["joint_position"]
+        bounds = env.action_space.high
+        actions = np.broadcast_to(bounds * 0.95, (env.num_envs, bounds.size)).copy()
+        targets = term.process(actions)
+        expected = term.state.default_angles + term.state.bias + actions * term.state.action_scales
+        np.testing.assert_allclose(targets, expected, rtol=1e-5, atol=1e-6)
+
+        # AND semantics: one hand alone yields zero, both yield +weight*dt.
+        env.state.reward[:] = 0.0
+        both_and_single = np.array([[1.0, 1.0], [1.0, 0.0]], dtype=np.float32)
+        env._apply_bimanual_contact_reward(
+            env.state, both_and_single, np.array([True, True], dtype=bool)
+        )
+        np.testing.assert_array_equal(env._bimanual_contact_mask, [True, False])
+        np.testing.assert_allclose(
+            env._bimanual_contact_reward,
+            [env._BIMANUAL_CONTACT_WEIGHT * cfg.ctrl_dt, 0.0],
+        )
+
+        # Contact outside the reference lifting/carrying phase is not rewarded.
+        env.state.reward[:] = 0.0
+        env._apply_bimanual_contact_reward(
+            env.state, np.ones((2, 2), dtype=np.float32), np.array([False, True], dtype=bool)
+        )
+        np.testing.assert_allclose(
+            env._bimanual_contact_reward,
+            [0.0, env._BIMANUAL_CONTACT_WEIGHT * cfg.ctrl_dt],
+        )
+    finally:
+        del env
+
+
+@pytest.mark.numba
+def test_reward05_50_original_retains_calibrated_target_clipping():
+    name = "g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50"
+    env = registry.resolve(name).make(num_envs=1, seed=61)
+    try:
+        env.init_state()
+        assert env.cfg.actions.joint_position.clip_target is True
+        assert env.cfg.actions.joint_position.safety_clip_fraction == pytest.approx(0.95)
+    finally:
+        del env
+
+
 @pytest.mark.numba
 def test_unilab_full_start_bonus_is_ten_once_and_not_dt_scaled():
     """Test host-side success injection while keeping unrelated termination checks isolated."""
