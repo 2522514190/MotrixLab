@@ -7,6 +7,7 @@ import numpy as np
 
 from motrix_env_core import registry
 from motrix_env_core.mdp.action_space import symmetric_residual_action_space
+from motrix_env_core.sim import GeomPairCollidingQuery
 from motrix_envs.locomotion.wbt.g1.omniretarget import (
     OmniRetargetEnv,
     OmniRetargetEnvCfg,
@@ -525,4 +526,84 @@ class OmniRetargetReward05_80Term30kEnv(OmniRetargetReward05_80Env):
 
 registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-80-term30k")(
     OmniRetargetReward05_80Term30kEnv
+)
+
+
+# Single, intentionally minimal follow-on experiment based on reward05-50:
+# keep position AND orientation rewards at 0.5 -> 0.2 over 50%-95% survival,
+# disable only the custom PD-target clipping, and add one reward for actual
+# simultaneous left/right hand contact with the box.
+@registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-bimanual")
+def make_box_reward05_50_bimanual_cfg() -> OmniRetargetEnvCfg:
+    cfg = _make_box_reward_ablation_cfg()
+    cfg.actions.joint_position.clip_target = False
+    cfg.queries.data["hand_box_contacts"] = GeomPairCollidingQuery(
+        pairs=(
+            ("left_hand_collision", "largebox_collision"),
+            ("right_hand_collision", "largebox_collision"),
+        )
+    )
+    return cfg
+
+
+class OmniRetargetReward05_50BimanualEnv(OmniRetargetReward05_50Env):
+    """One additional bimanual-contact reward; no hand approach or height reward.
+
+    Reward only during the reference lift/carry portion, with 0.5 s lookahead
+    to allow both hands to establish contact just BEFORE the reference rises.
+    This phase gate is not an extra reward. No box state is added to the actor.
+    """
+
+    _BIMANUAL_CONTACT_WEIGHT = 0.5
+    _BIMANUAL_REFERENCE_RISE_M = 0.03
+    _BIMANUAL_LOOKAHEAD_STEPS = 25
+
+    def __init__(self, cfg: OmniRetargetEnvCfg, num_envs=1, backend=None, seed=None):
+        super().__init__(cfg, num_envs=num_envs, backend=backend, seed=seed)
+        self._bimanual_contact_reward = np.zeros(num_envs, dtype=np.float32)
+        self._bimanual_contact_mask = np.zeros(num_envs, dtype=bool)
+        self._bimanual_phase_mask = np.zeros(num_envs, dtype=bool)
+
+    def init_state(self):
+        state = super().init_state()
+        state.reward_terms["box_bimanual_contact_reward"] = self._bimanual_contact_reward
+        state.metrics["box_bimanual_contact"] = self._bimanual_contact_mask
+        state.metrics["box_bimanual_phase"] = self._bimanual_phase_mask
+        return state
+
+    def _reference_bimanual_phase(self, motion) -> np.ndarray:
+        ref_z = motion.clip.extensions["object_pos_w"].data[:, 2]
+        indices = np.clip(motion.steps[:, 0], 0, len(ref_z) - 1)
+        lookahead = np.minimum(indices + self._BIMANUAL_LOOKAHEAD_STEPS, len(ref_z) - 1)
+        # During normal pre-grasp, lifting and carrying, but not while the box
+        # remains at rest at the start or has been placed at the end.
+        return np.maximum(ref_z[indices], ref_z[lookahead]) >= (
+            float(ref_z[0]) + self._BIMANUAL_REFERENCE_RISE_M
+        )
+
+    def _apply_bimanual_contact_reward(
+        self, state, contacts: np.ndarray, phase_mask: np.ndarray
+    ) -> None:
+        if contacts.shape != (self.num_envs, 2):
+            raise ValueError(f"Expected (num_envs, 2) hand-box contacts, got {contacts.shape}")
+        self._bimanual_contact_mask[:] = (contacts[:, 0] > 0.5) & (contacts[:, 1] > 0.5)
+        self._bimanual_phase_mask[:] = phase_mask
+        self._bimanual_contact_reward[:] = (
+            self._BIMANUAL_CONTACT_WEIGHT
+            * self.cfg.ctrl_dt
+            * (self._bimanual_contact_mask & self._bimanual_phase_mask)
+        )
+        state.reward[:] += self._bimanual_contact_reward
+
+    def compute_transition(self, state):
+        # Preserve all original completion checks and survival-based curriculum.
+        state = super().compute_transition(state)
+        contacts = self._compiled_manager_program.read_plan.sim_data.view("hand_box_contacts")
+        phase_mask = self._reference_bimanual_phase(self.command_terms["motion"])
+        self._apply_bimanual_contact_reward(state, contacts, phase_mask)
+        return state
+
+
+registry.env("g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-bimanual")(
+    OmniRetargetReward05_50BimanualEnv
 )
