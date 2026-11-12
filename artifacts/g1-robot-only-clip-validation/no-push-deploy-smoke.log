@@ -1,0 +1,50 @@
+Converting 29 actuators from position servos to torque motors with MjSpec: left_hip_pitch_joint, left_hip_roll_joint, left_hip_yaw_joint, left_knee_joint, left_ankle_pitch_joint, left_ankle_roll_joint, right_hip_pitch_joint, right_hip_roll_joint, right_hip_yaw_joint, right_knee_joint, right_ankle_pitch_joint, right_ankle_roll_joint, waist_yaw_joint, waist_roll_joint, waist_pitch_joint, left_shoulder_pitch_joint, left_shoulder_roll_joint, left_shoulder_yaw_joint, left_elbow_joint, left_wrist_roll_joint, left_wrist_pitch_joint, left_wrist_yaw_joint, right_shoulder_pitch_joint, right_shoulder_roll_joint, right_shoulder_yaw_joint, right_elbow_joint, right_wrist_roll_joint, right_wrist_pitch_joint, right_wrist_yaw_joint
+Built MuJoCo deployment model from SceneCfg StandardSceneCfg
+{
+  "completed_steps": 150,
+  "error": null,
+  "exit_reason": "completed",
+  "latency": {
+    "action": {
+      "max_ms": 0.034069,
+      "mean_ms": 0.02809769333333333,
+      "p95_ms": 0.029594
+    },
+    "inference": {
+      "max_ms": 0.196328,
+      "mean_ms": 0.037970986666666665,
+      "p95_ms": 0.0404545
+    },
+    "input": {
+      "max_ms": 0.00356,
+      "mean_ms": 0.0007998012048192773,
+      "p95_ms": 0.0008575
+    },
+    "loop": {
+      "max_ms": 0.491113,
+      "mean_ms": 0.3106438727272727,
+      "p95_ms": 0.336795
+    },
+    "observation": {
+      "max_ms": 0.124528,
+      "mean_ms": 0.08955843333333334,
+      "p95_ms": 0.0927685
+    },
+    "read": {
+      "max_ms": 0.04707,
+      "mean_ms": 0.036107927710843375,
+      "p95_ms": 0.038635
+    },
+    "write": {
+      "max_ms": 0.047669,
+      "mean_ms": 0.042427151515151515,
+      "p95_ms": 0.04435999999999999
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 2.999999999999891,
+  "real_time_factor": 20.880739863078663,
+  "success": true,
+  "trace_sha256": "12a4b8cdfa4cf4ea3b5724e28fbf872a6ef312a2638c16e5f4825cbc2acc230c",
+  "wall_time_s": 0.14367307
+}

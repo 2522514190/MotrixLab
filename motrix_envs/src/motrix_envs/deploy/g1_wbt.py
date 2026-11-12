@@ -14,6 +14,7 @@ from motrix_deploy_tasks.tasks.g1_wbt import G1WbtMotion, G1WbtTaskSpec
 from motrix_env_core import registry
 from motrix_envs.deploy.robot import build_robot_model, build_robot_spec, read_position_servo_gains
 from motrix_envs.locomotion.wbt.g1.common import G1WbtEnvCfg
+from motrix_envs.locomotion.wbt.g1.largebox import RobotOnlyCarryEnvCfg
 from motrix_envs.locomotion.wbt.g1.omniretarget import OmniRetargetEnvCfg
 from motrix_envs.motion.library import expand_motion_paths
 from motrix_envs.motion.loader import MotrixMotion
@@ -67,23 +68,25 @@ def build_g1_wbt_profile(env_name: str) -> DeploymentProfile:
     )
     motion_payload_path = "payloads/motion.npz"
     initial = None
-    if isinstance(cfg, OmniRetargetEnvCfg):
+    if isinstance(cfg, (OmniRetargetEnvCfg, RobotOnlyCarryEnvCfg)):
         root = motion.body_index(robot.base_link_name)
+        bodies = {
+            robot.base_link_name: FloatingBodyState(
+                tuple(motion.body_pos_w[0, root].tolist()),
+                tuple(motion.body_quat_w[0, root].tolist()),
+                tuple(motion.body_lin_vel_w[0, root].tolist()),
+                tuple(motion.body_ang_vel_w[0, root].tolist()),
+            ),
+        }
+        if isinstance(cfg, OmniRetargetEnvCfg):
+            bodies[cfg.sim_reset.object_state.body] = FloatingBodyState(
+                tuple(motion.extensions["object_pos_w"][0].tolist()),
+                tuple(motion.extensions["object_quat_w"][0].tolist()),
+                tuple(motion.extensions["object_lin_vel_w"][0].tolist()),
+                (0.0, 0.0, 0.0),
+            )
         initial = SimulationInitialState(
-            bodies={
-                robot.base_link_name: FloatingBodyState(
-                    tuple(motion.body_pos_w[0, root].tolist()),
-                    tuple(motion.body_quat_w[0, root].tolist()),
-                    tuple(motion.body_lin_vel_w[0, root].tolist()),
-                    tuple(motion.body_ang_vel_w[0, root].tolist()),
-                ),
-                cfg.sim_reset.object_state.body: FloatingBodyState(
-                    tuple(motion.extensions["object_pos_w"][0].tolist()),
-                    tuple(motion.extensions["object_quat_w"][0].tolist()),
-                    tuple(motion.extensions["object_lin_vel_w"][0].tolist()),
-                    (0.0, 0.0, 0.0),
-                ),
-            },
+            bodies=bodies,
             joint_positions=dict(
                 zip(robot.joint_names, np.clip(joint_pos[0], robot.position_lower, robot.position_upper).tolist())
             ),
@@ -91,7 +94,7 @@ def build_g1_wbt_profile(env_name: str) -> DeploymentProfile:
         )
     task = G1WbtTaskSpec(
         simulation_initial_state=initial,
-        action_safety_clip_fraction=cfg.actions.joint_position.safety_clip_fraction if initial is not None else 1.0,
+        action_safety_clip_fraction=action.safety_clip_fraction if action.safety_clip_fraction is not None else 1.0,
         action_scale=scale.tolist(),
         kp=kp.tolist(),
         kd=kd.tolist(),

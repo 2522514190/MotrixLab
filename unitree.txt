@@ -1,0 +1,5 @@
+ssh unitree@10.42.0.1 
+
+cd ~/MotrixLab
+
+source .venv/bin/activate

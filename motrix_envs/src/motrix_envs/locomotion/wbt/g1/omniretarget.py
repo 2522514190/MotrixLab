@@ -268,6 +268,8 @@ class OmniRetargetEnvCfg(G1WbtEnvCfg):
     sim_reset: OmniResetCfg = OmniResetCfg()
     randomization: OmniRandomizationCfg = OmniRandomizationCfg()
     object_curriculum: ObjectCurriculumCfg = ObjectCurriculumCfg()
+    play_training_perturbations: bool = True
+    play_ground_friction: float | None = None
     evaluation: bool = False
     randomize_initial_episode_progress: bool = True
 
@@ -288,11 +290,22 @@ class OmniRetargetEnvCfg(G1WbtEnvCfg):
 
     def for_play(self):
         cfg = super().for_play()
-        cfg.randomization.enabled = False
+        if cfg.play_training_perturbations:
+            from copy import deepcopy
+
+            cfg.sim_reset = deepcopy(self.sim_reset)
+        cfg.randomization.enabled = cfg.play_training_perturbations
+        if cfg.play_ground_friction is not None:
+            if not np.isfinite(cfg.play_ground_friction) or cfg.play_ground_friction < 0:
+                raise ValueError("play_ground_friction must be finite and nonnegative")
+            cfg.scene.objs.floor.friction = (cfg.play_ground_friction, *cfg.scene.objs.floor.friction[1:])
+            cfg.scene.objs.floor.priority = 2
         cfg.evaluation = True
         cfg.randomize_initial_episode_progress = False
         cfg.sim_reset.object_state.noise_scale = 0.0
-        # Actor noise is a training perturbation, not an evaluation perturbation.
+        if cfg.play_training_perturbations:
+            return cfg
+        # Clean playback can still be selected explicitly.
         cfg.observations.policy.motion_ref_ori_b.noise.amplitude = 0.0
         cfg.observations.policy.base_ang_vel.noise.amplitude = 0.0
         cfg.observations.policy.dof_pos.noise = 0.0
@@ -327,9 +340,8 @@ class OmniRetargetEnv(ManagerEnv):
         self._elapsed_since_reset = np.zeros(num_envs, dtype=np.int64)
         self._started_from_zero = np.zeros(num_envs, dtype=bool)
         self._gate = self.termination_manager.terms["object_tracking"].args[0]
-        self._gate.enabled[0] = (
-            cfg.evaluation
-            or (cfg.object_curriculum.error_termination_enabled and not cfg.object_curriculum.enabled)
+        self._gate.enabled[0] = cfg.evaluation or (
+            cfg.object_curriculum.error_termination_enabled and not cfg.object_curriculum.enabled
         )
         self._domain_writes = self.sim.compile_writes(
             {

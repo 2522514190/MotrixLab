@@ -1,0 +1,2 @@
+Motphys profiler initialized: disabled
+{"trial": 0, "success": false, "steps": 69, "reference_frame": 68, "reasons": ["bad_body_z"], "joint_tracking_rmse_rad": 0.12166853744348465, "target_clip_fraction": 0.0, "actual_joint_violation_fraction": 0.008995502248875561, "max_actual_joint_violation_rad": 0.0014102458953857422}

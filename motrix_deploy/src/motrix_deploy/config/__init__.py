@@ -11,14 +11,20 @@ runtimes stay a plain mapping because their schema is owned by the installed
 backend plugin, which decodes it strictly at the factory boundary.
 """
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 
 from motrix_deploy.env import assemble_deploy_scene
-from motrix_deploy.runtime.config import SensorBindings, SimulationRuntimeConfig
+from motrix_deploy.runtime.config import (
+    SensorBindings,
+    SimulationRandomizationCfg,
+    SimulationRuntimeConfig,
+    VelocityPushCfg,
+)
 from motrix_env_core.config.sim import SimCfg
 
 SIM_SCHEMA_GROUP = "runtime"
@@ -39,6 +45,7 @@ class SimRuntimeCfg:
     """Structured schema for one simulated deployment runtime recipe."""
 
     backend: str = MISSING
+    num_envs: int = 1
     viewer: bool = True
     realtime: bool | None = None
     deploy_env_id: str = MISSING
@@ -47,6 +54,10 @@ class SimRuntimeCfg:
     robot_translation: tuple[float, float, float] | None = None
     robot_rotation: tuple[float, float, float, float] | None = None
     physics: SimCfg = field(default_factory=lambda: SimCfg(dt=0.002, solver_iterations=100))
+    push: VelocityPushCfg = field(default_factory=VelocityPushCfg)
+    randomization: SimulationRandomizationCfg = field(default_factory=SimulationRandomizationCfg)
+    floor_sliding_friction: float | None = None
+    box_enabled: bool = True
     sensor_bindings: SensorBindings = field(default_factory=SensorBindings)
 
     def __post_init__(self) -> None:
@@ -54,11 +65,23 @@ class SimRuntimeCfg:
             raise ValueError("runtime.backend must be a non-empty string")
         if not self.deploy_env_id or not self.robot_id:
             raise ValueError("runtime.deploy_env_id and runtime.robot_id must be non-empty registered IDs")
+        if self.num_envs < 1:
+            raise ValueError("runtime.num_envs must be positive")
         self.physics.validate()
 
     def build_runtime_config(self) -> SimulationRuntimeConfig:
         """Assemble the recipe's scene and decode it into the frozen runtime contract."""
         scene = assemble_deploy_scene(self.deploy_env_id, self.robot_id)
+        randomization = self.randomization
+        if self.deploy_env_id == "g1-largebox" and not self.box_enabled:
+            scene.objs.box = None
+            randomization = replace(randomization, load_body=None, load_geom=None)
+        if self.floor_sliding_friction is not None:
+            if not math.isfinite(self.floor_sliding_friction) or self.floor_sliding_friction < 0:
+                raise ValueError("floor_sliding_friction must be finite and nonnegative")
+            floor = scene.objs.floor
+            floor.friction = (self.floor_sliding_friction, *floor.friction[1:])
+            floor.priority = 2
         if self.robot_init_key_pose is not None:
             scene.objs.robot.init_key_pose = self.robot_init_key_pose
         for field_name in ("translation", "rotation"):
@@ -69,6 +92,8 @@ class SimRuntimeCfg:
             scene=scene,
             physics=self.physics,
             sensor_bindings=self.sensor_bindings,
+            push=self.push,
+            randomization=randomization,
             render=self.viewer,
             realtime=self.viewer if self.realtime is None else self.realtime,
         )

@@ -54,3 +54,26 @@ def test_default_play_target_uses_cartpole(monkeypatch, tmp_path):
 
     assert play._resolve_play_target(PlayConfig()) == expected
     assert requested == [("cartpole", None)]
+
+
+@pytest.mark.parametrize("env_name", ["g1-29dof-wbt-largebox", "g1-29dof-wbt-largebox-omniretarget-fastsac-a"])
+@pytest.mark.parametrize("perturbations", [True, False])
+def test_carry_play_forwards_perturbation_controls(monkeypatch, tmp_path, env_name, perturbations):
+    """Both carrying policies expose the same play perturbation controls."""
+    from types import SimpleNamespace
+
+    policy_path = _metadata_run(tmp_path, env_name=env_name)
+    recorded = {}
+    monkeypatch.setattr(play, "_play_render_config", lambda target, cfg: None)
+
+    def create_handle(run, **kwargs):
+        recorded.update(kwargs)
+        return SimpleNamespace(play=lambda path: recorded.update(policy_path=path))
+
+    monkeypatch.setattr(play.runner, "create_run_handle", create_handle)
+    play.run(PlayConfig(policy=str(policy_path), perturbations=perturbations, ground_friction=0.9))
+    assert recorded["env_cfg_override"] == {
+        "play_training_perturbations": perturbations,
+        "play_ground_friction": 0.9,
+    }
+    assert recorded["policy_path"] == str(policy_path)

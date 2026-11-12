@@ -48,6 +48,7 @@ class TrainerContext(Generic[CfgT]):
     checkpoint: Any
     render: Any = None
     resume_from: str | None = None
+    env_cfg_override: dict[str, Any] = field(default_factory=dict)
     # Live metrics for this run; disabled unless the control plane enabled it for training.
     metrics: MetricsLogger = field(default_factory=MetricsLogger.disabled)
 

@@ -21,7 +21,7 @@ algo:
     target_entropy_ratio: 0.5
     num_atoms: 501
   trainer:
-    num_learning_iterations: 40000
+    num_learning_iterations: 60000
     async_options:
       # Keep the WBT training UTD fixed at four updates per ingested batch.
       utd_mode: strict

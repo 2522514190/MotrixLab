@@ -1,11 +1,33 @@
-ckpt=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-g/motrix/torch/fastsac/26-11-08_10-45-07-796932/checkpoints/latest.pt
-run_dir=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-g/motrix/torch/fastsac/26-11-08_10-45-07-796932
-out=artifacts/g1-largebox-g-model_latest.deploy
+ckpt=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-a-ground-action-dr05/motrix/torch/fastsac/26-11-12_03-09-28-523809/checkpoints/latest.pt
+run_dir=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-a-ground-action-dr05/motrix/torch/fastsac/26-11-12_03-09-28-523809
+out=g1-29dof-wbt-largebox-omniretarget-fastsac-a-ground-action-dr05-model_latest.deploy
 mxlab export-deploy run_dir="$run_dir" checkpoint="$ckpt" output="$out"
 
 
-artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-largebox-g-model_latest.deploy
-mxlab deploy task=g1-largebox/sim artifact="$artifact" runtime.backend=motrixsim loop=true
 
-artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-largebox-g-model_latest.deploy
-mxlab deploy task=g1-largebox/sim artifact="$artifact" runtime.backend=mujoco loop=true
+
+artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-29dof-wbt-largebox-omniretarget-fastsac-a-ground-action-dr05-model_latest.deploy
+mxlab deploy task=g1-largebox/sim artifact="$artifact" runtime.backend=mujoco loop=true  runtime.floor_sliding_friction=0.8  runtime.box_enabled=true
+
+
+mxlab play \
+  env=g1-29dof-wbt-largebox\
+  policy=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox/motrix/torch/fastsac/26-11-12_15-40-43-811938/checkpoints/latest.pt\
+  num_envs=4 \
+  ground_friction=1.0
+
+
+
+
+
+uv run python scripts/motion/replay.py \
+  --robot=g1-29dof \
+  --motion=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/motrix_envs/src/motrix_envs/locomotion/wbt/assets/motion/g1/sub3_largebox_003_upright_start_end_hold_745.npz \
+  --show-object \
+  --loop \
+  --speed=1
+
+
+tensorboard --logdir=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox-omniretarget-fastsac-reward05-50-orifixed --port=6006
+
+

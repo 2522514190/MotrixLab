@@ -1,0 +1,7 @@
+Motphys profiler initialized: disabled
+{
+  "artifact": "/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-robot-only-clip-40000-preview.deploy",
+  "max_abs_error": 6.139278411865234e-06,
+  "run": "runs/g1-29dof-wbt-largebox/motrix/torch/fastsac/26-11-12_14-22-29-630492",
+  "validation_samples": 32
+}

@@ -1,0 +1,9 @@
+# @package _global_
+defaults:
+  - /task/g1-29dof-wbt-largebox-omniretarget-fastsac/motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-omniretarget-fastsac-a-ground-action-dr05
+algo:
+  trainer:
+    num_learning_iterations: 100000

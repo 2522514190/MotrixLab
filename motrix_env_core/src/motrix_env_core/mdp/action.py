@@ -55,8 +55,15 @@ class JointPositionActionTerm(ActionTerm):
 
     state: JointPositionActionState
 
-    def __init__(self, space: gym.spaces.Box, state: JointPositionActionState) -> None:
+    def __init__(
+        self, space: gym.spaces.Box, state: JointPositionActionState, safety_clip_fraction: float | None = None
+    ) -> None:
         super().__init__(space, state)
+        self._target_limits = None
+        if safety_clip_fraction is not None:
+            midpoint = (state.joint_lower + state.joint_upper) * 0.5
+            half_range = (state.joint_upper - state.joint_lower) * (0.5 * safety_clip_fraction)
+            self._target_limits = (midpoint - half_range, midpoint + half_range)
 
     def _process(self, actions: np.ndarray) -> np.ndarray:
         """Map raw policy actions to targets using manager-owned action history."""
@@ -71,7 +78,10 @@ class JointPositionActionTerm(ActionTerm):
                 delay_indices[:, None, None],
                 axis=1,
             )[:, 0, :]
-        return target_raw * state.action_scales + state.default_angles
+        target = target_raw * state.action_scales + state.default_angles
+        if self._target_limits is not None:
+            target = np.clip(target, *self._target_limits)
+        return target
 
     def _reset(self, env_ids: np.ndarray) -> None:
         """Resample per-episode delay after the base term clears raw history."""
@@ -100,8 +110,12 @@ class JointPositionActionCfg(ActionCfg):
     action_scale: float = 0.25
     action_scales_by_effort_limit_over_p_gain: bool = False
     action_delay_steps: tuple[int, int] = (0, 0)
+    # None preserves the unbounded target transform. Fraction is about the joint-limit midpoint.
+    safety_clip_fraction: float | None = None
 
     def __call__(self, env: ManagerEnv, actuators: tuple[ActuatorSpec, ...] | None) -> JointPositionActionTerm:
+        if self.safety_clip_fraction is not None and not 0.0 < self.safety_clip_fraction <= 1.0:
+            raise ValueError("safety_clip_fraction must be in (0, 1] or None")
         if actuators is None:
             actuators = env.model.actuators
         robot = env.cfg.scene.objs.robot
@@ -157,7 +171,7 @@ class JointPositionActionCfg(ActionCfg):
         space = joint_position_action_space_from_ctrl_ranges(
             np.asarray(ctrl_ranges, dtype=np.float32), state.default_angles, state.action_scales
         )
-        return JointPositionActionTerm(space, state)
+        return JointPositionActionTerm(space, state, self.safety_clip_fraction)
 
     @staticmethod
     def _resolve_default_pose(

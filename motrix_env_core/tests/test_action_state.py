@@ -96,3 +96,25 @@ def test_action_state_accessors_follow_cursor_changes() -> None:
 
     np.testing.assert_array_equal(state.current(), initial_previous)
     np.testing.assert_array_equal(state.previous(), initial_current)
+
+
+@pytest.mark.parametrize("delayed", [False, True])
+def test_joint_target_clip_preserves_raw_history(delayed: bool) -> None:
+    """Clip scaled PD targets about asymmetric limits, including delayed actions."""
+    raw = np.asarray([[20.0, -20.0, 0.25]], dtype=np.float32)
+    state = JointPositionActionState(
+        action_queue=np.stack((raw, -raw), axis=1),
+        action_ptr=np.asarray([1], dtype=np.int64),
+        default_angles=np.asarray([1.0, 2.0, -1.0], dtype=np.float32),
+        joint_lower=np.asarray([-2.0, 0.0, -3.0], dtype=np.float32),
+        joint_upper=np.asarray([4.0, 6.0, 1.0], dtype=np.float32),
+        action_scales=np.asarray([0.5, 2.0, 1.0], dtype=np.float32),
+        delay_steps=np.asarray([1], dtype=np.int64),
+        delay_lo=int(delayed),
+        delay_hi=int(delayed),
+    )
+    history = state.action_queue.copy()
+    term = JointPositionActionTerm(gym.spaces.Box(-np.inf, np.inf, shape=(3,)), state, 0.8)
+    np.testing.assert_allclose(term._process(raw if not delayed else -raw), [[3.4, 0.6, -0.75]], atol=1e-6)
+    np.testing.assert_array_equal(state.action_queue, history)
+    np.testing.assert_array_equal(raw, [[20, -20, 0.25]])

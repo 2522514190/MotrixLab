@@ -5,6 +5,17 @@ defaults:
 
 artifact: ???
 runtime:
+  box_enabled: true
+  num_envs: 1
+  viewer: true
+  randomization:
+    enabled: true
+    load_body: baseLink
+    load_geom: largebox_collision
+    com_body: torso_link
+  push:
+    enabled: false
+  floor_sliding_friction: 1.6
   backend: mujoco
   deploy_env_id: g1-largebox
   robot_id: g1-29dof

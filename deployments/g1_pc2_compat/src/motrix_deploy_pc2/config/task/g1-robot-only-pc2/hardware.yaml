@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - /runtime@runtime: _unitree_schema
+  - /unitree_control@runtime.control: g1
+  - _self_
+
+artifact: artifacts/g1-robot-only-pc2.deploy
+
+runtime:
+  backend: unitree
+  robot: g1-29dof
+  transport:
+    implementation: native_cpp
+    network_interface: ???
+duration_s: null
+
+task_settings:
+  final_frame_hold_s: 0.0
+  preparation:
+    default_transition_duration_s: 3.0
+    wait_for_remote_buttons: true
+    start_button: start
+    enable_button: A
+    # null selects the shared FixStand gains, not the policy tracking gains.
+    kp: null
+    kd: null

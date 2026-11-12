@@ -107,10 +107,18 @@ def run(cfg: PlayConfig) -> None:
     try:
         target = _resolve_play_target(cfg)
         render = _play_render_config(target, cfg)
+        env_name = target.run.metadata.env_name
+        carry = env_name == "g1-29dof-wbt-largebox" or env_name.startswith("g1-29dof-wbt-largebox-omniretarget-fastsac")
+        env_override = (
+            {"play_training_perturbations": cfg.perturbations, "play_ground_friction": cfg.ground_friction}
+            if carry
+            else {}
+        )
         trainer = runner.create_run_handle(
             target.run,
             cfg_override=cfg.rl,
-            play_num_envs=cfg.num_envs,
+            play_num_envs=cfg.num_envs if cfg.num_envs is not None else (16 if carry else None),
+            env_cfg_override=env_override,
             seed=cfg.seed,
             randomize_seed=cfg.rand_seed,
             render=render,

@@ -3,11 +3,15 @@
 
 """Runtime resources, scheduling and physics advancement of a bound control session."""
 
+import logging
 from abc import ABC, abstractmethod
-from dataclasses import fields
+from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from motrix_deploy.errors import ValidationError
+from motrix_deploy.runtime.config import SimulationRandomizationCfg, VelocityPushCfg
 from motrix_deploy.runtime.control import ControlSession
 from motrix_deploy.runtime.result import RolloutResult, SimulationRolloutResult
 from motrix_deploy.runtime.scheduler import LoopScheduler
@@ -100,8 +104,15 @@ class DeploymentRuntime(ABC):
 class SimulationRuntime(DeploymentRuntime, ABC):
     """Runtime that additionally owns simulation advancement and viewer resources."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, push: VelocityPushCfg | None = None, randomization: SimulationRandomizationCfg | None = None
+    ) -> None:
         super().__init__()
+        self._push = push or VelocityPushCfg()
+        self._push_rng = np.random.default_rng(self._push.seed)
+        self._randomization = randomization or SimulationRandomizationCfg()
+        self._physical_rng = np.random.default_rng(self._randomization.seed)
+        self._load_draw = None
         self._policy_simulation_time_s = 0.0
 
     def bind_session(self, session: ControlSession) -> None:
@@ -140,13 +151,69 @@ class SimulationRuntime(DeploymentRuntime, ABC):
     def _advance_interval(self) -> None:
         assert self.session is not None
         before = self._physics_time_s()
+        if self._push.enabled and self.session.policy_tick and self._policy_simulation_time_s >= self._next_push_s:
+            linear = self._push_rng.uniform(-np.asarray(self._push.linear), self._push.linear)
+            angular = self._push_rng.uniform(-np.asarray(self._push.angular), self._push.angular)
+            self._apply_root_velocity_push(linear, angular)
+            logging.getLogger(__name__).info("Root push at %.2fs: dv=%s dw=%s", before, linear, angular)
+            self._next_push_s = self._policy_simulation_time_s + self._push_rng.uniform(*self._push.interval_s)
         try:
             self.advance_control_period()
         finally:
             if self.session.policy_tick:
                 self._policy_simulation_time_s += self._physics_time_s() - before
 
+    def _sample_load(self):
+        """Keep load dynamics fixed for the lifetime of this runtime."""
+        cfg = self._randomization
+        if self._load_draw is None:
+            rng = self._physical_rng
+            self._load_draw = (
+                rng.uniform(*cfg.load_mass),
+                rng.uniform(-np.asarray(cfg.load_com), cfg.load_com),
+                rng.uniform(*cfg.load_inertia_factor),
+                rng.uniform(*cfg.load_friction),
+            )
+        return self._load_draw
+
+    def _initial_state_for_reset(self):
+        from motrix_env_core.math.quaternion import from_euler, mul
+
+        initial = self.config.initial_state
+        cfg = self._randomization
+        if initial is None or not cfg.enabled:
+            return initial
+        rng = self._physical_rng
+
+        def noise(amplitude):
+            return rng.uniform(-np.asarray(amplitude), amplitude)
+
+        name = self.scene.objs.robot.resolved_base_link_name
+        bodies = dict(initial.bodies)
+        base = bodies[name]
+        quat = mul(from_euler(*noise(cfg.base_rotation)), np.asarray(base.quaternion_xyzw))
+        bodies[name] = replace(
+            base,
+            position=tuple(np.asarray(base.position) + noise(cfg.base_position)),
+            quaternion_xyzw=tuple(quat / np.linalg.norm(quat)),
+            linear_velocity=tuple(np.asarray(base.linear_velocity) + noise(cfg.base_linear_velocity)),
+            angular_velocity=tuple(np.asarray(base.angular_velocity) + noise(cfg.base_angular_velocity)),
+        )
+        positions = dict(initial.joint_positions)
+        for joint, low, high in zip(
+            self.robot.spec.joint_names, self.robot.spec.position_lower, self.robot.spec.position_upper, strict=True
+        ):
+            if joint in positions:
+                positions[joint] = float(
+                    np.clip(positions[joint] + rng.uniform(-cfg.joint_position, cfg.joint_position), low, high)
+                )
+        return replace(initial, bodies=bodies, joint_positions=positions)
+
+    def _apply_root_velocity_push(self, linear: np.ndarray, angular: np.ndarray) -> None:
+        raise NotImplementedError("This simulation backend does not support root velocity pushes")
+
     def _run_session(self, scheduler: LoopScheduler) -> SimulationRolloutResult:
+        self._next_push_s = self._push_rng.uniform(*self._push.interval_s)
         self._policy_simulation_time_s = 0.0
         result = super()._run_session(scheduler)
         return SimulationRolloutResult(

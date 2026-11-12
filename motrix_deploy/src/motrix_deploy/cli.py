@@ -5,7 +5,10 @@
 
 import json
 import math
+import multiprocessing
 import sys
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import hydra
@@ -24,6 +27,25 @@ from motrix_deploy.task import create_task, load_task_type
 
 def run(cfg: DeployRunConfig) -> int:
     """Run one deployment rollout from typed application configuration."""
+    if isinstance(cfg.runtime, SimRuntimeCfg) and cfg.runtime.num_envs > 1:
+        # Each process owns its scene, policy state, random streams and reset lifecycle.
+        with ProcessPoolExecutor(
+            max_workers=cfg.runtime.num_envs, mp_context=multiprocessing.get_context("spawn")
+        ) as pool:
+            futures = []
+            for index in range(cfg.runtime.num_envs):
+                runtime = replace(
+                    cfg.runtime,
+                    num_envs=1,
+                    push=replace(cfg.runtime.push, seed=cfg.runtime.push.seed + index),
+                    randomization=replace(cfg.runtime.randomization, seed=cfg.runtime.randomization.seed + index),
+                )
+                futures.append(pool.submit(_run_environment, replace(cfg, runtime=runtime), index))
+            return max(future.result() for future in futures)
+    return _run_environment(cfg)
+
+
+def _run_environment(cfg: DeployRunConfig, index: int | None = None) -> int:
     from motrix_deploy.policy import OnnxPolicy
 
     artifact = read_artifact(Path(cfg.artifact))
@@ -34,7 +56,17 @@ def run(cfg: DeployRunConfig) -> int:
     steps = _duration_steps(duration_s, manifest.control.period_s)
     if default_duration_s is not None and duration_s > default_duration_s + 1e-9:
         raise ValueError("duration_s exceeds the task's finite playback budget")
-    policy = OnnxPolicy(artifact.policy_path, manifest.policy.input, manifest.policy.output)
+    if index is None:
+        policy = OnnxPolicy(artifact.policy_path, manifest.policy.input, manifest.policy.output)
+    else:
+        import onnxruntime as ort
+
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = 1
+        options.inter_op_num_threads = 1
+        policy = OnnxPolicy(
+            artifact.policy_path, manifest.policy.input, manifest.policy.output, session_options=options
+        )
     task = create_task(manifest.task, manifest.robot, policy, steps=steps, artifact=artifact)
     simulation = isinstance(cfg.runtime, SimRuntimeCfg)
     spawn_pose = cfg.runtime.robot_init_key_pose if simulation else None
@@ -73,7 +105,10 @@ def run(cfg: DeployRunConfig) -> int:
     with runtime:
         while True:
             result = runtime.run()
-            print(json.dumps(result.to_dict(), indent=2, sort_keys=True), flush=True)
+            report = result.to_dict()
+            if index is not None:
+                report.update(env_index=index, seed=cfg.runtime.randomization.seed, push_seed=cfg.runtime.push.seed)
+            print(json.dumps(report, sort_keys=True, indent=2 if index is None else None), flush=True)
             if not cfg.loop or result.exit_reason not in {"completed", "task_terminated"}:
                 break
             runtime.restart(

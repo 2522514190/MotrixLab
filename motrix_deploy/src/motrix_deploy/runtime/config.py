@@ -75,6 +75,68 @@ class SimulationInitialState:
             raise ValueError("initial_state joint values must be finite")
 
 
+@dataclass
+class VelocityPushCfg:
+    """Independent world-axis velocity increments, sampled on policy time."""
+
+    enabled: bool = False
+    seed: int = 1
+    interval_s: tuple[float, float] = (1.0, 3.0)
+    linear: tuple[float, float, float] = (0.3, 0.3, 0.3)
+    angular: tuple[float, float, float] = (0.78, 0.78, 0.78)
+
+    def __post_init__(self) -> None:
+        low, high = self.interval_s
+        if not 0 < low <= high or not math.isfinite(high):
+            raise ValueError("push.interval_s requires positive finite ordered bounds")
+        for amplitude in (self.linear, self.angular):
+            if len(amplitude) != 3 or any(not math.isfinite(v) or v < 0 for v in amplitude):
+                raise ValueError("push amplitudes require three finite nonnegative values")
+
+
+@dataclass
+class SimulationRandomizationCfg:
+    """Named load/body perturbations for simulation-only robustness evaluation."""
+
+    enabled: bool = False
+    seed: int = 1
+    load_body: str | None = None
+    load_geom: str | None = None
+    com_body: str | None = None
+    load_mass: tuple[float, float] = (0.1, 0.5)
+    load_com: tuple[float, float, float] = (0.02, 0.02, 0.02)
+    load_inertia_factor: tuple[float, float] = (0.8, 1.2)
+    load_friction: tuple[float, float] = (0.5, 0.8)
+    body_com: tuple[float, float, float] = (0.025, 0.05, 0.075)
+    base_position: tuple[float, float, float] = (0.05, 0.05, 0.01)
+    base_rotation: tuple[float, float, float] = (0.1, 0.1, 0.2)
+    base_linear_velocity: tuple[float, float, float] = (0.5, 0.5, 0.2)
+    base_angular_velocity: tuple[float, float, float] = (0.52, 0.52, 0.78)
+    joint_position: float = 0.1
+    observation_noise: bool = True
+
+    def __post_init__(self) -> None:
+        for name in ("load_mass", "load_inertia_factor", "load_friction"):
+            low, high = getattr(self, name)
+            if not (math.isfinite(low) and math.isfinite(high) and 0 <= low <= high):
+                raise ValueError(f"randomization.{name} requires finite ordered nonnegative bounds")
+        if self.load_mass[0] <= 0 or self.load_inertia_factor[0] <= 0:
+            raise ValueError("Randomized mass and inertia must be positive")
+        for name in (
+            "load_com",
+            "body_com",
+            "base_position",
+            "base_rotation",
+            "base_linear_velocity",
+            "base_angular_velocity",
+        ):
+            value = getattr(self, name)
+            if len(value) != 3 or any(not math.isfinite(v) or v < 0 for v in value):
+                raise ValueError(f"randomization.{name} requires three nonnegative finite amplitudes")
+        if not math.isfinite(self.joint_position) or self.joint_position < 0:
+            raise ValueError("randomization.joint_position must be finite and nonnegative")
+
+
 @dataclass(frozen=True)
 class SimulationRuntimeConfig:
     scene: SceneCfg
@@ -84,6 +146,9 @@ class SimulationRuntimeConfig:
     # Deployment recipe: semantic RobotState fields mapped to model-local sensor names.
     sensor_bindings: SensorBindings = field(default_factory=SensorBindings)
     initial_state: SimulationInitialState | None = None
+
+    push: VelocityPushCfg = field(default_factory=VelocityPushCfg)
+    randomization: SimulationRandomizationCfg = field(default_factory=SimulationRandomizationCfg)
 
     def __post_init__(self) -> None:
         self.physics.validate()
@@ -96,7 +161,9 @@ class SimulationRuntimeConfig:
         values = dict(value)
         values.pop("name", None)
         values.setdefault("sensor_bindings", {})
-        expected = {"scene", "physics", "sensor_bindings"}
+        values.setdefault("push", {})
+        values.setdefault("randomization", {})
+        expected = {"scene", "physics", "sensor_bindings", "push", "randomization"}
         if set(values) != expected:
             raise ValidationError(
                 "runtime",
@@ -112,6 +179,8 @@ class SimulationRuntimeConfig:
             scene=values["scene"],
             physics=SimCfg(**values["physics"]),
             sensor_bindings=SensorBindings(**values["sensor_bindings"]),
+            push=VelocityPushCfg(**values["push"]),
+            randomization=SimulationRandomizationCfg(**values["randomization"]),
             render=render,
             realtime=realtime,
         )

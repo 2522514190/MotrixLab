@@ -109,6 +109,8 @@ class PlayConfig:
     num_envs: int | None = None
     seed: int | None = None
     rand_seed: bool = False
+    perturbations: bool = True
+    ground_friction: float = 1.6
     record_video: bool = False
     record_seconds: float = 10.0
     record_width: int = 256

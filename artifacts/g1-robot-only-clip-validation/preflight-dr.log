@@ -1,0 +1,45 @@
+Motphys profiler initialized: disabled
+/home/yudong-chen/.cache/motrixlab/numba-manager/generated/805bf07d3b97d283453358ed7d5aecb84f75ca7478220c0876af080969646ffa.py:102: NumbaPerformanceWarning: [1m[1m[1mnp.dot() is faster on contiguous arrays, called on (Array(float32, 1, 'A', False, aligned=True), Array(float32, 1, 'A', False, aligned=True))[0m[0m[0m
+  term_reset_1(ctx, sim_writes_1, (np.float32(0.1), np.float32(0.1), np.float32(0.2)))
+/home/yudong-chen/.cache/motrixlab/numba-manager/generated/805bf07d3b97d283453358ed7d5aecb84f75ca7478220c0876af080969646ffa.py:102: NumbaPerformanceWarning: [1m[1m[1mnp.dot() is faster on contiguous arrays, called on (Array(float32, 1, 'A', False, aligned=True), Array(float32, 1, 'A', False, aligned=True))[0m[0m[0m
+  term_reset_1(ctx, sim_writes_1, (np.float32(0.1), np.float32(0.1), np.float32(0.2)))
+{
+  "frames": 745,
+  "fps": 50,
+  "clip_fraction": 0.95,
+  "action_parity_samples": 103,
+  "max_abs_error": 2.9802322387695312e-08,
+  "frames_outside_clip": 263,
+  "joints_outside_clip": {
+    "left_ankle_roll_joint": 49,
+    "right_ankle_roll_joint": 66,
+    "waist_pitch_joint": 184
+  },
+  "ground_friction": [
+    1.1118216514587402,
+    1.5504636764526367,
+    0.7441596388816833,
+    1.5486494302749634,
+    0.9118314385414124,
+    1.0233263969421387,
+    1.42770254611969,
+    1.0091991424560547
+  ],
+  "friction_reset_persistence": true,
+  "forced_push_delta": {
+    "linear": [
+      -0.20360881090164185,
+      0.2819552421569824,
+      0.009641148149967194
+    ],
+    "angular": [
+      -0.5992496013641357,
+      0.19264402985572815,
+      0.431625634431839
+    ]
+  },
+  "push_interval_s": [
+    1.0,
+    3.0
+  ]
+}

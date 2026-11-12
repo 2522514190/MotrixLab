@@ -17,6 +17,7 @@ from motrix_deploy.runtime.scheduler import FixedStepScheduler, RealtimeSchedule
 from motrix_deploy_motrixsim.robot import Robot
 from motrix_deploy_motrixsim.viewer import MotrixSimViewer
 from motrix_env_core.config.scene.base import RobotCfg
+from motrix_env_core.math.quaternion import rotate_inverse
 from motrix_env_motrixsim.compiler import MotrixSimSceneCompiler
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ class MotrixSimRuntime(SimulationRuntime):
     """Own the native world; expose robot I/O before session assembly."""
 
     def __init__(self, config: SimulationRuntimeConfig, *, viewer_factory=None) -> None:
-        super().__init__()
+        super().__init__(config.push, config.randomization)
         self.config = config
         self.scene = deepcopy(config.scene)
         robot = self.scene.objs.robot
@@ -165,7 +166,7 @@ class MotrixSimRuntime(SimulationRuntime):
         position = np.asarray(self.model.compute_init_dof_pos(), dtype=np.float32).copy()
         position[self._robot.joint_dof_pos_indices] = self.initial_joint_position(self.robot.spec)
         velocity = np.zeros(self.model.num_dof_vel, dtype=np.float32)
-        initial = self.config.initial_state
+        initial = self._initial_state_for_reset()
         if initial is not None:
             for name, value in initial.joint_positions.items():
                 position[self.model.get_joint(name).dof_pos_index] = value
@@ -190,6 +191,7 @@ class MotrixSimRuntime(SimulationRuntime):
             dof_vel=velocity,
             forward_kinematic=True,
         )
+        self._randomize_physics()
         self.simulation_time_s = 0.0
         if self._opened:
             self._robot.refresh_reads()
@@ -213,6 +215,36 @@ class MotrixSimRuntime(SimulationRuntime):
     def _reset_for_replay(self) -> None:
         self._robot.bind()
         self.sync_viewer()
+
+    def _randomize_physics(self) -> None:
+        cfg = self._randomization
+        if not cfg.enabled:
+            return
+        if cfg.load_body is not None:
+            mass, com, factor, friction = self._sample_load()
+            link = self.model.get_link(cfg.load_body)
+            link.set_mass_override(self.data, [mass])
+            link.set_center_of_mass_override(self.data, np.asarray([com], dtype=np.float32))
+            inertia = np.zeros((1, 6), dtype=np.float32)
+            inertia[0, :3] = mass * 0.02 * factor
+            link.set_inertia_override(self.data, inertia)
+            geom = self.model.get_geom(cfg.load_geom)
+            values = np.asarray([geom.friction], dtype=np.float32)
+            values[0, 0] = friction
+            geom.set_friction_override(self.data, values)
+        if cfg.com_body is not None:
+            link = self.model.get_link(cfg.com_body)
+            nominal = link.get_center_of_mass_override(self.data).copy()
+            amplitude = np.asarray(cfg.body_com)
+            link.set_center_of_mass_override(self.data, nominal + self._physical_rng.uniform(-amplitude, amplitude))
+
+    def _apply_root_velocity_push(self, linear: np.ndarray, angular: np.ndarray) -> None:
+        base = self.model.get_body(self.scene.objs.robot.resolved_base_link_name).floatingbase
+        quat = self.data.dof_pos[0, base.dof_pos_indices[3:]]
+        velocity = self.data.dof_vel.copy()
+        velocity[0, base.dof_vel_indices[:3]] += linear
+        velocity[0, base.dof_vel_indices[3:]] += rotate_inverse(quat, angular)
+        self.data.set_dof_vel(velocity)
 
     def _physics_time_s(self) -> float:
         return self.simulation_time_s

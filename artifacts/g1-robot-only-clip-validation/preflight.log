@@ -1,0 +1,14 @@
+Motphys profiler initialized: disabled
+{
+  "frames": 745,
+  "fps": 50,
+  "clip_fraction": 0.95,
+  "action_parity_samples": 103,
+  "max_abs_error": 2.9802322387695312e-08,
+  "frames_outside_clip": 263,
+  "joints_outside_clip": {
+    "left_ankle_roll_joint": 49,
+    "right_ankle_roll_joint": 66,
+    "waist_pitch_joint": 184
+  }
+}

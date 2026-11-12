@@ -1,0 +1,37 @@
+[
+  {
+    "component": "actor",
+    "same_shapes": true,
+    "elements": 252916,
+    "identical_tensors": 2,
+    "tensor_count": 18
+  },
+  {
+    "component": "qnet",
+    "same_shapes": true,
+    "elements": 1441503,
+    "identical_tensors": 1,
+    "tensor_count": 29
+  },
+  {
+    "component": "qnet_target",
+    "same_shapes": true,
+    "elements": 1441503,
+    "identical_tensors": 1,
+    "tensor_count": 29
+  },
+  {
+    "component": "obs_normalizer",
+    "same_shapes": true,
+    "elements": 463,
+    "identical_tensors": 1,
+    "tensor_count": 4
+  },
+  {
+    "component": "critic_obs_normalizer",
+    "same_shapes": true,
+    "elements": 895,
+    "identical_tensors": 1,
+    "tensor_count": 4
+  }
+]

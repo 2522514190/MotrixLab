@@ -253,18 +253,31 @@ class G1WbtPolicyProcessor(PolicyProcessor[None]):
             orientation = np.concatenate((w * r + s * v + np.cross(v, r), [w * s - np.dot(v, r)]))
         return (orientation / np.linalg.norm(orientation)).astype(np.float32)
 
+    def set_observation_noise(self, enabled: bool, seed: int) -> None:
+        """Perturb only actor inputs during simulated evaluation."""
+        self._observation_noise = np.zeros(self.observation_size, dtype=np.float32)
+        if enabled:
+            self._observation_noise[58:64] = 0.05
+            self._observation_noise[64:67] = 0.2
+            self._observation_noise[67:96] = 0.01
+            self._observation_noise[96:125] = 0.5
+        self._observation_rng = np.random.default_rng(seed)
+
     def build_observation(self, state: RobotState, context: ControlContext[None]) -> FloatArray:
         frame = context.step if self._reference_frame is None else self._reference_frame
         if not 0 <= frame < self._frames:
             raise ValidationError("context.step", "a frame inside the single motion clip", frame)
         self._latest_frame = frame
-        return self.actor_observation(
+        observation = self.actor_observation(
             frame,
             self.torso_orientation(state),
             state.base_angular_velocity,
             state.joint_position,
             state.joint_velocity,
         )
+        if hasattr(self, "_observation_noise") and np.any(self._observation_noise):
+            observation += self._observation_rng.uniform(-self._observation_noise, self._observation_noise)
+        return observation
 
     def process_action(self, action: FloatArray) -> JointServoCommand:
         raw = float32_array(action, path="action.raw", shape=(29,))
@@ -448,6 +461,11 @@ class G1WbtDeployTask(DeployTask[None]):
 
     def configure_simulation(self, config: SimulationRuntimeConfig) -> SimulationRuntimeConfig:
         initial = self.spec.simulation_initial_state
+        if initial is not None and hasattr(config.scene.objs, "box") and config.scene.objs.box is None:
+            base = config.scene.objs.robot.resolved_base_link_name
+            initial = replace(initial, bodies={name: state for name, state in initial.bodies.items() if name == base})
+        dr = config.randomization
+        self.policy_io.set_observation_noise(dr.enabled and dr.observation_noise, dr.seed)
         self._direct_playback = initial is not None
         return replace(config, initial_state=initial) if initial is not None else config
 

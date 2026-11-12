@@ -1,0 +1,42 @@
+Motphys profiler initialized: disabled
+{
+  "frames": 745,
+  "fps": 50,
+  "clip_fraction": 0.95,
+  "action_parity_samples": 103,
+  "max_abs_error": 2.9802322387695312e-08,
+  "frames_outside_clip": 263,
+  "joints_outside_clip": {
+    "left_ankle_roll_joint": 49,
+    "right_ankle_roll_joint": 66,
+    "waist_pitch_joint": 184
+  },
+  "push_disabled_with_ground_dr_enabled": true,
+  "ground_friction": [
+    1.1118216514587402,
+    1.5504636764526367,
+    0.7441596388816833,
+    1.5486494302749634,
+    0.9118314385414124,
+    1.0233263969421387,
+    1.42770254611969,
+    1.0091991424560547
+  ],
+  "friction_reset_persistence": true,
+  "forced_push_delta": {
+    "linear": [
+      -0.20360881090164185,
+      0.2819552421569824,
+      0.009641151875257492
+    ],
+    "angular": [
+      -0.5992496013641357,
+      0.1926441192626953,
+      0.4316256642341614
+    ]
+  },
+  "push_interval_s": [
+    1.0,
+    3.0
+  ]
+}

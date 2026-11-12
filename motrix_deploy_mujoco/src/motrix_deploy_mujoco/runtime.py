@@ -46,7 +46,7 @@ class MujocoRuntime(SimulationRuntime):
         control_period_s: float | None = None,
         viewer_factory: Callable[[ModuleType, SystemCameraCfg], MujocoGlfwViewer] = MujocoGlfwViewer,
     ) -> None:
-        super().__init__()
+        super().__init__(config.push, config.randomization)
         try:
             import mujoco
         except ImportError as error:
@@ -159,12 +159,13 @@ class MujocoRuntime(SimulationRuntime):
     ) -> None:
         assert self.model is not None and self.data is not None
         self.mj.mj_resetData(self.model, self.data)
+        initial = self._initial_state_for_reset()
+        self._randomize_physics()
         qpos = self.data.qpos
         # qpos0 already composes RobotCfg's attach transform with the imported
         # model root pose. Keep it intact instead of applying placement twice.
         qpos[joint_qpos_indices] = joint_position
         self.data.qvel.fill(0.0)
-        initial = self.config.initial_state
         if initial is not None:
             for name, value in initial.joint_positions.items():
                 joint = self.model.joint(name).id
@@ -193,6 +194,35 @@ class MujocoRuntime(SimulationRuntime):
     def _reset_for_replay(self) -> None:
         self._robot.bind()
         self.sync_viewer()
+
+    def _randomize_physics(self) -> None:
+        cfg = self._randomization
+        if not cfg.enabled:
+            return
+        if cfg.load_body is not None:
+            mass, com, factor, friction = self._sample_load()
+            body = self.model.body(cfg.load_body).id
+            self.model.body_mass[body] = mass
+            self.model.body_ipos[body] = com
+            self.model.body_inertia[body] = mass * 0.02 * factor
+            self.model.geom_friction[self.model.geom(cfg.load_geom).id, 0] = friction
+        if cfg.com_body is not None:
+            body = self.model.body(cfg.com_body).id
+            if not hasattr(self, "_nominal_body_com"):
+                self._nominal_body_com = self.model.body_ipos[body].copy()
+            amplitude = np.asarray(cfg.body_com)
+            self.model.body_ipos[body] = self._nominal_body_com + self._physical_rng.uniform(-amplitude, amplitude)
+        self.mj.mj_setConst(self.model, self.data)
+
+    def _apply_root_velocity_push(self, linear: np.ndarray, angular: np.ndarray) -> None:
+        body = self.model.body(self.scene.objs.robot.resolved_base_link_name).id
+        joint = self.model.body_jntadr[body]
+        start = self.model.jnt_dofadr[joint]
+        pos = self.model.jnt_qposadr[joint]
+        rotation = np.empty(9)
+        self.mj.mju_quat2Mat(rotation, self.data.qpos[pos + 3 : pos + 7])
+        self.data.qvel[start : start + 3] += linear
+        self.data.qvel[start + 3 : start + 6] += rotation.reshape(3, 3).T @ angular
 
     def _physics_time_s(self) -> float:
         return float(self.data.time)

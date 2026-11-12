@@ -1,0 +1,661 @@
+Training startup: resolving train backend for motrix/fastsac
+Unable to initialize backend 'rocm': module 'jaxlib.xla_extension' has no attribute 'GpuAllocatorConfig'
+Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+Training startup: resolved train backend 'torch' in 0.777s (env=g1-29dof-wbt-largebox, num_envs=64)
+Training startup: created run context in 0.011s (run_dir=runs/g1-29dof-wbt-largebox/motrix/torch/fastsac/26-11-12_12-22-42-312315)
+Motphys profiler initialized: disabled
+Training startup: trainer handle ready in 1.058s
+Manager env 'ManagerEnv': numba TBB threading layer available
+╭──────────────────── g1-29dof-wbt-largebox/motrix.fastsac ────────────────────╮
+│ ╭──────────── collector0 ────────────╮╭───────────── learner ──────────────╮ │
+│ │ (waiting for worker logs…)         ││ [motrix.fastsac async] collector/l │ │
+│ │                                    ││ earner training 'g1-29dof-wbt-larg │ │
+│ │                                    ││ ebox' learner=cuda learner_replica │ │
+│ │                                    ││ s=1 collector_env=cpu collector_in │ │
+│ │                                    ││ ference=cuda:0 num_collectors=1 nu │ │
+│ │                                    ││ ma_nodes=[None] learner_numa_nodes │ │
+│ │                                    ││ =[None] num_envs=64 iters=30 from= │ │
+│ │                                    ││ 0 utd_mode=strict                  │ │
+│ │                                    ││                                    │ │
+│ │                                    ││                                    │ │
+│ │                                    ││                                    │ │
+│ │                                    ││                                    │ │
+│ │                                    ││                                    │ │
+│ │                                    ││                                    │ │
+│ ╰────────────────────────────────────╯╰────────────────────────────────────╯ │
+│ ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ │
+│ ┃ worker                                    ┃ status                       ┃ │
+│ ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩ │
+│ │ collector[0]                              │ booting…                     │ │
+│ │ learner[0]                                │ booting…                     │ │
+│ └───────────────────────────────────────────┴──────────────────────────────┘ │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯[motrix.fastsac async] all 2 workers ready — training starts
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - measuring… - 0m00s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  25.0% (4.0/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 8%  4.3/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m01s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  27.9% (4.5/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 7%  4.0/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m02s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  11.0% (1.8/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 6%  4.0/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m03s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  10.5% (1.7/16T, 8C)   iowait 0.1%   steal 0.0%
+ system      gpu 4%  4.1/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m04s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   9.1% (1.5/16T, 8C)   iowait 0.1%   steal 0.0%
+ system      gpu 4%  4.0/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m05s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  11.3% (1.8/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 8%  4.0/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m06s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   8.4% (1.3/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 97%  4.1/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m07s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  26.1% (4.2/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 4%  4.1/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m08s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  11.7% (1.9/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 5%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m09s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  11.0% (1.8/16T, 8C)   iowait 0.1%   steal 0.0%
+ system      gpu 4%  4.3/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m10s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   9.4% (1.5/16T, 8C)   iowait 0.1%   steal 0.0%
+ system      gpu 5%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m11s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   9.3% (1.5/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 7%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m12s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  10.2% (1.6/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 5%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m13s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  13.5% (2.2/16T, 8C)   iowait 0.1%   steal 0.0%
+ system      gpu 3%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m14s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  10.9% (1.7/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 2%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m15s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  11.2% (1.8/16T, 8C)   iowait 0.1%   steal 0.0%
+ system      gpu 3%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m16s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   9.1% (1.5/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 3%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m17s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   8.7% (1.4/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 4%  4.2/15.9 GiB
+ train       training metrics unavailable (0/4.1k)
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           ring wait 1.597
+ diagnostics UTD 0.000
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m18s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu  10.0% (1.6/16T, 8C)   iowait 0.2%   steal 0.0%
+ system      gpu 45%  4.1/15.9 GiB
+ train       final_obs_events 0.000       batch_reward_max -3.880
+             batch_reward_mean -15.583    qf_loss 11.808
+             qf_max -3.581                qf_min -20.000
+             alpha_loss 0.029             alpha_loss_abs 0.029
+             alpha 9.993e-04              policy_entropy 14.036
+             actor_loss 0.393             batch_reward_max_max -2.545
+             qf_max_max -2.546            qf_min_max -20.000
+             alpha_loss_abs_max 0.029     policy_entropy_max 14.206
+             batch_reward_max_min -4.751  qf_max_min -4.276
+             qf_min_min -20.000           alpha_loss_abs_min 0.029
+             policy_entropy_min 13.866
+ buffer      512/4.1k
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           drain 2.264      ring wait 0.709  gate wait 0.680
+                   └─ update 19117.516
+                      ├─ sample_normalize 108.158  critic_alpha 9565.149
+                      └─ actor 9429.581            publish 0.294
+ diagnostics UTD 0.133
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+ g1-29dof-wbt-largebox/motrix.fastsac - iter 30/30 (100.0%) - 0 env-steps/s - 0m19s - eta ~0m00s
+------------------------------------------------------------------------------------
+ rollout     return  -112.391   ep_len    11.3   episodes     64
+ system      cpu   7.1% (1.1/16T, 8C)   iowait 0.0%   steal 0.0%
+ system      gpu 0%  3.6/15.9 GiB
+ train       final_obs_events 0.000       batch_reward_max -3.880
+             batch_reward_mean -15.583    qf_loss 11.808
+             qf_max -3.581                qf_min -20.000
+             alpha_loss 0.029             alpha_loss_abs 0.029
+             alpha 9.993e-04              policy_entropy 14.036
+             actor_loss 0.393             batch_reward_max_max -2.545
+             qf_max_max -2.546            qf_min_max -20.000
+             alpha_loss_abs_max 0.029     policy_entropy_max 14.206
+             batch_reward_max_min -4.751  qf_max_min -4.276
+             qf_min_min -20.000           alpha_loss_abs_min 0.029
+             policy_entropy_min 13.866
+ buffer      512/4.1k
+ reward(dt)  action_rate_l2 -0.3299
+             motion_relative_body_position_error_exp +0.0294
+             motion_global_ref_position_error_exp +0.0133
+             motion_global_body_lin_vel +0.0106
+             motion_relative_body_orientation_error_exp +0.0066
+             motion_global_body_ang_vel +0.0065
+             limits_dof_pos -0.0049
+             motion_global_ref_orientation_error_exp +0.0037
+             undesired_contacts -0.0007
+ metrics     adaptive_failure_mass +0.124   adaptive_sampling_entropy +0.889   adaptive_sampling_top1_bin +0.000   adaptive_sampling_top1_prob +0.320   bad_body_z +0.016   bad_dof_pos +0.000   bad_dof_vel +0.000   bad_ref_ori +0.000   bad_ref_z +0.000   body_z_max_err +0.115   clip_ended +0.000   dof_limit_violation_max +4.611e-04   dof_vel_abs_max +4.538   motion_step +297.234   ref_ori_abs_err +0.145   ref_z_abs_err +0.090
+ collector         wait 0.000
+                   ├─ sync 0.013
+                   │  ├─ actor_load 0.000     host_snapshot 0.000
+                   │  └─ wait_writer 0.000
+                   ├─ env_step 6.623
+                   │  ├─ observation 0.116   physics 2.829
+                   │  ├─ transition 1.441    apply_action 0.518
+                   │  └─ reset 1.472
+                   sample_actions 0.473  bookkeep 0.234
+                   push 0.193
+ learner           drain 2.264      ring wait 0.709  gate wait 0.680
+                   └─ update 19117.516
+                      ├─ sample_normalize 108.158  critic_alpha 9565.149
+                      └─ actor 9429.581            publish 0.294
+ diagnostics UTD 0.133
+------------------------------------------------------------------------------------

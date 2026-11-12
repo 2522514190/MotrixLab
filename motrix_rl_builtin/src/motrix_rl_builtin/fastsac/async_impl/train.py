@@ -74,7 +74,8 @@ class Trainer(TrainerBase):
         env_name = context.env_name
         self._rlcfg = context.rl_cfg
         self._env_name = env_name
-        self._env_spec = env_registry.resolve(env_name, sim=context.sim)
+        env_cfg = env_registry.make_env_config(env_name, env_cfg_override=context.env_cfg_override)
+        self._env_spec = env_registry.resolve(env_name, env_cfg=env_cfg, sim=context.sim)
         self._render = context.render
         self._resume_from = context.resume_from
         self._context = context

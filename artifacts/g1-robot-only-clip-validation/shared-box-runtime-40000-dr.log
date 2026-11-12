@@ -1,0 +1,51 @@
+Converting 29 actuators from position servos to torque motors with MjSpec: left_hip_pitch_joint, left_hip_roll_joint, left_hip_yaw_joint, left_knee_joint, left_ankle_pitch_joint, left_ankle_roll_joint, right_hip_pitch_joint, right_hip_roll_joint, right_hip_yaw_joint, right_knee_joint, right_ankle_pitch_joint, right_ankle_roll_joint, waist_yaw_joint, waist_roll_joint, waist_pitch_joint, left_shoulder_pitch_joint, left_shoulder_roll_joint, left_shoulder_yaw_joint, left_elbow_joint, left_wrist_roll_joint, left_wrist_pitch_joint, left_wrist_yaw_joint, right_shoulder_pitch_joint, right_shoulder_roll_joint, right_shoulder_yaw_joint, right_elbow_joint, right_wrist_roll_joint, right_wrist_pitch_joint, right_wrist_yaw_joint
+Built MuJoCo deployment model from SceneCfg StandardSceneCfg
+Root push at 2.04s: dv=[ 0.27027822 -0.21350423  0.26918967] dw=[-0.29354293 -0.11961074  0.51121605]
+{
+  "completed_steps": 150,
+  "error": null,
+  "exit_reason": "completed",
+  "latency": {
+    "action": {
+      "max_ms": 0.061118,
+      "mean_ms": 0.03136806,
+      "p95_ms": 0.046172
+    },
+    "inference": {
+      "max_ms": 0.249194,
+      "mean_ms": 0.054305393333333334,
+      "p95_ms": 0.08800599999999997
+    },
+    "input": {
+      "max_ms": 0.00548,
+      "mean_ms": 0.001126975903614458,
+      "p95_ms": 0.0018175
+    },
+    "loop": {
+      "max_ms": 3.591957,
+      "mean_ms": 0.40894047272727263,
+      "p95_ms": 0.5993219999999998
+    },
+    "observation": {
+      "max_ms": 3.169547,
+      "mean_ms": 0.12097116666666667,
+      "p95_ms": 0.15042804999999995
+    },
+    "read": {
+      "max_ms": 3.082429,
+      "mean_ms": 0.06623345783132531,
+      "p95_ms": 0.0787855
+    },
+    "write": {
+      "max_ms": 0.069979,
+      "mean_ms": 0.04504929696969697,
+      "p95_ms": 0.06487079999999999
+    }
+  },
+  "overrun_count": 0,
+  "policy_simulation_time_s": 2.999999999999891,
+  "real_time_factor": 14.234117980387857,
+  "success": true,
+  "trace_sha256": "f0067ae29e7fbf6224a55eb3972b830957a1419c081eaebf06f70857bcd1aa46",
+  "wall_time_s": 0.210761215
+}
