@@ -1,3 +1,6 @@
+# Copyright Motphys Technology Co., Ltd. 2025, 2026
+# SPDX-License-Identifier: Apache-2.0
+
 """Evaluate complete robot-only carrying plus final hold without recovery resets."""
 
 import argparse
@@ -35,12 +38,13 @@ def main():
     parser.add_argument("--trials", type=int, default=20)
     parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--perturbations", action="store_true")
+    parser.add_argument("--hold-seconds", type=float, default=5.0)
     args = parser.parse_args()
     found = runs.find_metadata_for_policy(args.policy)
-    if found is None or args.trials < 1:
+    if found is None or args.trials < 1 or args.hold_seconds < 0:
         parser.error("a metadata-backed checkpoint and positive trial count are required")
     run_dir, metadata = found
-    if metadata.env_name != "g1-29dof-wbt-largebox":
+    if metadata.env_name not in ("g1-29dof-wbt-largebox", "g1-29dof-wbt-largebox-opentrack406"):
         parser.error("expected the robot-only largebox task")
     trainer = runner.create_run_handle(
         runs.open_run_context(run_dir, metadata),
@@ -52,7 +56,7 @@ def main():
     trainer._set_seed(args.seed)
     cfg = registry.make_env_config(metadata.env_name, mode="play")
     cfg.commands.motion.sequential_clips = False
-    cfg.commands.motion.hold_at_clip_end = True
+    cfg.commands.motion.hold_at_clip_end = args.hold_seconds > 0
     cfg.randomization.enabled = args.perturbations
     # Full-start evaluation isolates observation noise and optional physical DR.
     for term in cfg.sim_reset.to_dict().values():
@@ -69,7 +73,8 @@ def main():
         motion = inner.command_terms["motion"]
         term = inner.action_terms["joint_position"]
         frames = len(motion.clip.joint_pos)
-        steps = frames + round(5.0 / cfg.ctrl_dt)
+        # Stop upon reaching the final reference frame, before clip wrap rematerialization.
+        steps = frames - 1 if args.hold_seconds == 0 else frames + round(args.hold_seconds / cfg.ctrl_dt)
         error_sq = 0.0
         clipped = violated = total = 0
         max_violation = 0.0
@@ -112,11 +117,12 @@ def main():
         perturbations=args.perturbations,
         push_enabled=cfg.randomization.push_enabled,
         seed=args.seed,
-        hold_s=5.0,
+        hold_s=args.hold_seconds,
+        frames=frames,
         trials=args.trials,
         successes=sum(e["success"] for e in episodes),
         success_rate=sum(e["success"] for e in episodes) / args.trials,
-        criterion="full clip from frame zero plus 5s final hold without termination or recovery",
+        criterion=f"full clip from frame zero plus {args.hold_seconds:g}s final hold without termination or recovery",
         observation_noise=True,
         reset_noise=False,
         failure_counts=dict(Counter(r for e in episodes for r in e["reasons"])),

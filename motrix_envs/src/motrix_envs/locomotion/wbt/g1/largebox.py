@@ -48,9 +48,7 @@ class RobotOnlyCarryEnvCfg(G1WbtEnvCfg):
 @registry.envcfg("g1-29dof-wbt-largebox")
 def make_g129dof_wbt_largebox_cfg() -> RobotOnlyCarryEnvCfg:
     """Track the official robot-only carrying motion with the original WBT reward recipe."""
-    cfg = RobotOnlyCarryEnvCfg(
-        motion_files=(str(MOTION_DIR / "sub3_largebox_003.npz"),)
-    )
+    cfg = RobotOnlyCarryEnvCfg(motion_files=(str(MOTION_DIR / "sub3_largebox_003.npz"),))
     cfg.actions.joint_position.safety_clip_fraction = 0.95
     # As in the box ground-DR task, floor material wins contact mixing.
     cfg.scene.objs.floor.priority = 2
@@ -61,6 +59,16 @@ def make_g129dof_wbt_largebox_cfg() -> RobotOnlyCarryEnvCfg:
     return cfg
 
 
+@registry.envcfg("g1-29dof-wbt-largebox-opentrack406")
+def make_g129dof_wbt_opentrack406_cfg() -> RobotOnlyCarryEnvCfg:
+    """Use the official OpenTrack start prefix for the robot-only reference."""
+    cfg = make_g129dof_wbt_largebox_cfg()
+    cfg.commands.motion.motion_files = (str(MOTION_DIR / "sub3_largebox_003_opentrack_ik_start.npz"),)
+    cfg.commands.motion.hold_at_clip_end = False
+    return cfg
+
+
+@registry.env("g1-29dof-wbt-largebox-opentrack406")
 @registry.env("g1-29dof-wbt-largebox")
 class RobotOnlyCarryEnv(ManagerEnv):
     """Keep per-lane ground draws and apply the box task's velocity-kick pushes."""
