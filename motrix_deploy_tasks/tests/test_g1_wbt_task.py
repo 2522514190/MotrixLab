@@ -527,3 +527,33 @@ def test_action_safety_fraction_clips_about_joint_midpoint():
     command = task.process_action(np.full(29, 100, np.float32))
     np.testing.assert_allclose(command.joint_position, 0.7)
     np.testing.assert_array_equal(task.previous_action, 100)
+
+
+def test_staged_reference_start_and_completion_enter_damping():
+    controller = _task(
+        reference_quaternions=[[0, 0, -0.70710678, 0.70710678]] * 2,
+        controller=True,
+        automatic=True,
+        preparation={**_instant, "staged_start": True, "preparation_joint_position": [0.0] * 29},
+    )
+    state = _state()
+    controller.reset(state)
+    assert controller.phase == "fixstand"
+    for tick in range(30):
+        context = ControlContext(tick, tick * 0.02, None, dt_s=0.02)
+        decision = controller.step(state, context)
+        assert decision.error is None
+        if controller.phase == "policy_hold":
+            observation = controller.policy_io.build_observation(state, context)
+            np.testing.assert_allclose(observation[58:64], [1, 0, 0, 0, 1, 0], atol=1e-6)
+        if decision.complete:
+            break
+    assert controller.phase == "complete"
+    assert [stage.name for stage in controller.transitions] == [
+        "fixstand",
+        "prepare",
+        "policy_hold",
+        "playback",
+        "damping",
+    ]
+    assert controller.transitions[-2].steps == len(controller.motion)

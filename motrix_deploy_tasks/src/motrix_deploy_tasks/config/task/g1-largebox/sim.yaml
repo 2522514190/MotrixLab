@@ -12,7 +12,7 @@ runtime:
     enabled: true
     load_body: baseLink
     load_geom: largebox_collision
-    com_body: torso_link
+    com_body: null
   push:
     enabled: false
   floor_sliding_friction: 1.6

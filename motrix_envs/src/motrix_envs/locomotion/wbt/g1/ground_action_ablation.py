@@ -9,7 +9,7 @@ from motrix_env_core import registry
 from motrix_env_core.sim.model import GeomFrictionQuery
 from motrix_env_core.sim.write import GeomFrictionWrite
 from motrix_envs.locomotion.wbt.g1.omniretarget import OmniRetargetEnvCfg
-from motrix_envs.locomotion.wbt.g1.omniretarget_fastsac import OmniRetargetFastSacEnv, make_a_cfg
+from motrix_envs.locomotion.wbt.g1.omniretarget_fastsac import OmniRetargetFastSacEnv, _make_motion_cfg, make_a_cfg
 
 PREFIX = "g1-29dof-wbt-largebox-omniretarget-fastsac-"
 
@@ -46,6 +46,8 @@ def make_dr01_cfg() -> OmniRetargetEnvCfg:
 class GroundActionDrEnv(OmniRetargetFastSacEnv):
     """Retain one ground-friction draw per lane through all native resets."""
 
+    friction_range = (0.3, 1.6)
+
     def __init__(self, cfg, num_envs=1, backend=None, seed=None):
         super().__init__(cfg, num_envs=num_envs, backend=backend, seed=seed)
         self._ground_writes = self.sim.compile_writes({"friction": GeomFrictionWrite(("floor",))}, reset=False)
@@ -55,7 +57,7 @@ class GroundActionDrEnv(OmniRetargetFastSacEnv):
         friction[:, 0, 0] = (
             cfg.play_ground_friction
             if cfg.evaluation and cfg.play_ground_friction is not None
-            else rng.uniform(0.3, 1.6, size=num_envs)
+            else rng.uniform(*self.friction_range, size=num_envs)
         )
 
     def reset(self, env_ids, sim_reset_ids=None):
@@ -69,3 +71,19 @@ for suffix in ("a-ground-action-baseline", "a-ground-action-smooth01"):
     registry.env(PREFIX + suffix)(OmniRetargetFastSacEnv)
 for suffix in ("a-ground-action-dr05", "a-ground-action-dr01"):
     registry.env(PREFIX + suffix)(GroundActionDrEnv)
+
+
+@registry.envcfg(PREFIX + "a-opentrack506")
+def make_opentrack506_a_cfg() -> OmniRetargetEnvCfg:
+    cfg = _make_motion_cfg("sub3_largebox_003_w_obj_opentrack_ik_start.npz", 11.0)
+    cfg.rewards.undesired_contacts.weight = -0.1
+    cfg.object_curriculum.error_termination_enabled = True
+    cfg.commands.motion.adaptive_sampling_enabled = True
+    cfg.scene.objs.floor.priority = 2
+    cfg.queries.model["ground_action_friction"] = GeomFrictionQuery(name="floor")
+    return cfg
+
+
+@registry.env(PREFIX + "a-opentrack506")
+class OpenTrack506AEnv(GroundActionDrEnv):
+    friction_range = (0.6, 1.6)

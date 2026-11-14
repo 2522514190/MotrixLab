@@ -6,4 +6,4 @@ task:
   env: g1-29dof-wbt-largebox-opentrack406
 algo:
   trainer:
-    num_learning_iterations: 40000
+    num_learning_iterations: 80000

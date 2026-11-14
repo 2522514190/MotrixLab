@@ -54,6 +54,7 @@ class G1WbtTaskSpec(TaskSpec):
         ]
         | None
     ) = None
+    staged_start: bool = False
     preparation_joint_position: JointVector | None = None
     preparation_kp: GainVector | None = None
     preparation_kd: GainVector | None = None
@@ -407,7 +408,7 @@ class G1WbtDeployTask(DeployTask[None]):
     ):
         if motion is None:
             motion = load_g1_wbt_motion(spec, artifact)
-        budget = len(motion) if steps is None else steps
+        budget = len(motion) if steps is None or spec.staged_start else steps
         if not 0 < budget <= len(motion):
             raise ValidationError("steps", "a positive budget inside the single motion clip", budget)
         self.spec = spec
@@ -483,7 +484,10 @@ class G1WbtDeployTask(DeployTask[None]):
 
     @classmethod
     def default_duration_s(cls, spec: G1WbtTaskSpec, control_period_s: float) -> float:
-        return spec.motion_frames * control_period_s
+        duration = spec.motion_frames * control_period_s
+        if spec.staged_start:
+            duration += 2 * spec.preparation_timeout_s + 0.3 + 2 * control_period_s
+        return duration
 
     def validate_command(self, command: None) -> None:
         self.policy_io.validate_command(command)
@@ -507,7 +511,16 @@ class G1WbtDeployTask(DeployTask[None]):
         self.policy_io.reset_reference()
         self.transitions.clear()
         self._record = None
-        if self._direct_playback:
+        if self.spec.staged_start:
+            self.ready.select(
+                replace(
+                    self._preparation_spec,
+                    joint_position=np.asarray(self.robot.default_joint_position, dtype=np.float32),
+                )
+            )
+            self._enter_phase("fixstand")
+            self.ready.reset(state)
+        elif self._direct_playback:
             self._enter_phase("playback")
             self.policy_controller.steps = self._playback_budget
             self.policy_controller.reset(state)
@@ -594,7 +607,7 @@ class G1WbtDeployTask(DeployTask[None]):
         local = ControlContext(
             self._record.steps, context.elapsed_time_s - self._stage_origin_s, context.command, context.dt_s
         )
-        controller = self.ready if self._phase == "prepare" else self.damping
+        controller = self.ready if self._phase in {"fixstand", "prepare"} else self.damping
         decision = controller.step(state, local)
         if self._phase == "prepare":
             self._preparation_ready = decision.complete and decision.error is None
@@ -609,10 +622,19 @@ class G1WbtDeployTask(DeployTask[None]):
             return ControllerStep(complete=True, success=not self._stop_requested)
         if self._stop_requested and self._phase != "damping":
             self._begin_damping(state)
+        if self._phase == "fixstand":
+            decision = self._deterministic_step(state, context)
+            if decision.error is not None or not decision.complete:
+                return decision
+            self.ready.select(self._preparation_spec)
+            self._enter_phase("prepare")
+            self.ready.reset(state)
         if self._phase == "prepare":
             decision = self._deterministic_step(state, context)
             if decision.error is not None or not (self._preparation_ready and self._policy_start_requested):
                 return decision
+            if self.spec.staged_start:
+                self.policy_io.align_reference_to(state)
             self.policy_controller.reset(state)
             self._enter_phase("policy_hold")
         if self._phase == "policy_hold":

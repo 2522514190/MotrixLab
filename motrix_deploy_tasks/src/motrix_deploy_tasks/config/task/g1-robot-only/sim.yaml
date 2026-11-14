@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - /runtime: sim
+  - _self_
+
+artifact: ???
+runtime:
+  backend: mujoco
+  num_envs: 1
+  viewer: true
+  deploy_env_id: flat
+  robot_id: g1-29dof
+  # Initial heading matches frame 0 of sub3_largebox_003_opentrack_ik_start.
+  # Quaternion order is xyzw; yaw = -1.66680157 rad (-95.5007 degrees).
+  robot_rotation: [0.0, 0.0, 0.0, 0.0]
+  box_enabled: false
+  floor_sliding_friction: 1.6
+  randomization:
+    enabled: true
+    load_body: null
+    load_geom: null
+    com_body: null
+  push:
+    enabled: false
+  sensor_bindings:
+    base_angular_velocity: base_gyro
+    base_linear_acceleration: base_accel
+    base_linear_velocity: null
+  physics:
+    dt: 0.002
+    solver_iterations: 100

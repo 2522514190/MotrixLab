@@ -92,8 +92,11 @@ def build_g1_wbt_profile(env_name: str) -> DeploymentProfile:
             ),
             joint_velocities=dict(zip(robot.joint_names, joint_vel[0].tolist())),
         )
+    staged = env_name == "g1-29dof-wbt-largebox-opentrack406"
     task = G1WbtTaskSpec(
-        simulation_initial_state=initial,
+        staged_start=staged,
+        preparation_joint_position=joint_pos[0].tolist() if staged else None,
+        simulation_initial_state=None if staged else initial,
         action_safety_clip_fraction=action.safety_clip_fraction if action.safety_clip_fraction is not None else 1.0,
         action_scale=scale.tolist(),
         kp=kp.tolist(),

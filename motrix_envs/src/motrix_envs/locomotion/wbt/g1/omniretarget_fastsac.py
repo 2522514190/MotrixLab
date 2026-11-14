@@ -18,9 +18,13 @@ from motrix_envs.locomotion.wbt.g1.common import MOTION_DIR
 @registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac")
 def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
     """Build the common FastSAC carrying task configuration."""
+    return _make_motion_cfg("sub3_largebox_003_upright_start_end_hold_745.npz", 16.0)
+
+
+def _make_motion_cfg(filename: str, episode_seconds: float) -> OmniRetargetEnvCfg:
     cfg = make_omniretarget_cfg()
     # FastSAC-only trajectory swap: leave the shared PPO recipe untouched.
-    motion_path = MOTION_DIR / "sub3_largebox_003_upright_start_end_hold_745.npz"
+    motion_path = MOTION_DIR / filename
     if not motion_path.is_file():
         raise FileNotFoundError(
             f"Unilab carrying motion not found: {motion_path}. "
@@ -34,7 +38,7 @@ def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
                 f"Unexpected Unilab motion metadata: frames={frames}, fps={fps}, ctrl_dt={cfg.ctrl_dt}"
             )
     cfg.commands.motion.motion_files = (str(motion_path),)
-    cfg.max_episode_seconds = 16.0
+    cfg.max_episode_seconds = episode_seconds
     if cfg.max_episode_steps <= frames:
         raise ValueError(
             f"Episode horizon {cfg.max_episode_steps} must exceed {frames} motion frames."

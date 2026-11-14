@@ -1,7 +1,7 @@
 # Copyright Motphys Technology Co., Ltd. 2025, 2026
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generate a Motrix v1 robot-only prefix with unmodified upstream OpenTrack."""
+"""Generate a Motrix v1 motion prefix with unmodified upstream OpenTrack."""
 
 import argparse
 import importlib
@@ -36,7 +36,7 @@ def load(path):
 
 def joint_addresses(m, a):
     names = a["joint_names"].tolist()
-    if m.nq != 36 or len(set(names)) != 29 or m.jnt_type[0] != mj.mjtJoint.mjJNT_FREE:
+    if m.nq not in (36, 43) or len(set(names)) != 29 or m.jnt_type[0] != mj.mjtJoint.mjJNT_FREE:
         raise ValueError("Expected floating-base 29-joint G1")
     return [int(m.joint(name).qposadr[0]) for name in names]
 
@@ -47,6 +47,10 @@ def pack(m, a):
     q[:, :3] = a["body_pos_w"][:, root]
     q[:, 3:7] = np.roll(a["body_quat_w"][:, root], 1, axis=-1)
     q[:, joint_addresses(m, a)] = a["joint_pos"]
+    if m.nq == 43:
+        adr = int(m.joint("box_free").qposadr[0])
+        q[:, adr:adr+3] = a["ext_object_pos_w"]
+        q[:, adr+3:adr+7] = np.roll(a["ext_object_quat_w"], 1, axis=-1)
     return q
 
 
@@ -140,7 +144,40 @@ def fk(m, rows, ids):
     return np.array(pos), np.array(quat)
 
 
+OBJECT_FIELDS = {k: k.replace("body_", "ext_object_") for k in FIELDS if k.startswith("body_")}
+
+
+def build_with_box(args, a):
+    box = a["body_names"].tolist().index("largebox_link")
+    robot = dict(a)
+    for body, obj in OBJECT_FIELDS.items():
+        if "vel" not in obj:
+            np.testing.assert_allclose(a[body][:, box], a[obj], atol=2e-7)
+        robot[body] = np.delete(a[body], box, axis=1)
+        del robot[obj]
+    robot["body_names"] = np.delete(a["body_names"], box)
+    out, n = build(args, robot)
+    end = len(out["joint_pos"]) - n - len(a["joint_pos"])
+    for body, obj in OBJECT_FIELDS.items():
+        before = np.repeat(a[obj][:1], n, axis=0)
+        after = np.repeat(a[obj][-1:], end, axis=0)
+        if "vel" in obj:
+            before.fill(0)
+            after.fill(0)
+        out[obj] = np.concatenate((before, a[obj], after))
+        out[body] = np.concatenate((out[body][:, :box], out[obj][:, None], out[body][:, box:]), axis=1)
+        out[body][n : n + len(a[body]), box] = a[body][:, box]
+        if end and "vel" not in obj:
+            out[body][-end:, box] = a[body][-1, box]
+        if "vel" not in obj:
+            out[body][:n, box] = a[body][0, box]
+    out["body_names"] = a["body_names"]
+    return out, n
+
+
 def build(args, a):
+    if "largebox_link" in a["body_names"]:
+        return build_with_box(args, a)
     if {k for k in a if a[k].ndim and len(a[k]) == len(a["joint_pos"])} != set(FIELDS):
         raise ValueError("Unsupported motion channels; expected robot-only v1")
     fps = int(a["fps"])

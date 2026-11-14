@@ -35,6 +35,10 @@ class RobotOnlyCarryEnvCfg(G1WbtEnvCfg):
         cfg = super().for_play()
         cfg.evaluation = True
         cfg.randomization.enabled = cfg.play_training_perturbations
+        if cfg.play_training_perturbations:
+            # Restore training reset amplitudes after the base play configuration.
+            for name in ("body_pos", "body_rot", "body_lin_vel", "body_rot_vel", "body_dof_pos"):
+                getattr(cfg.sim_reset, name).noise_scale = getattr(self.sim_reset, name).noise_scale
         if not cfg.play_training_perturbations:
             for name in ("motion_ref_ori_b", "base_ang_vel", "dof_pos", "dof_vel"):
                 getattr(cfg.observations.policy, name).noise.amplitude = 0.0

@@ -11,15 +11,24 @@ from pathlib import Path
 
 import mujoco as mj
 import numpy as np
-from opentrack_start import FIELDS, INPUT, MOTRIX, load, pack
+from opentrack_start import ASSETS, FIELDS, OBJECT_FIELDS, INPUT, MOTRIX, load, pack
 from scipy.spatial.transform import Rotation
 
 
-def scene(xml, path):
+def scene(xml, path, with_box=False):
     tree = ET.parse(xml)
     compiler = tree.find("compiler")
     compiler.set("meshdir", str((xml.resolve().parent / compiler.get("meshdir", ".")).resolve()))
     ET.SubElement(tree.find("worldbody"), "geom", name="floor", type="plane", size="0 0 .05", rgba=".45 .48 .50 1")
+    if with_box:
+        mesh = ASSETS.parents[1] / "objects/largebox/largebox.obj"
+        ET.SubElement(tree.find("asset"), "mesh", name="largebox_mesh", file=str(mesh))
+        box = ET.SubElement(tree.find("worldbody"), "body", name="largebox_link")
+        ET.SubElement(box, "freejoint", name="box_free")
+        ET.SubElement(box, "geom", name="largebox_collision", type="mesh", mesh="largebox_mesh", rgba=".7 .8 .9 1")
+        # Robot keyframes have only the original robot coordinates.
+        for keyframes in tree.findall("keyframe"):
+            tree.getroot().remove(keyframes)
     tree.write(path)
 
 
@@ -27,11 +36,27 @@ def check(m, a, base):
     # Find splice even for optional end hold by matching all joint positions.
     candidates = np.flatnonzero(np.all(a["joint_pos"] == base["joint_pos"][0], axis=1))
     n = next(i for i in candidates if np.array_equal(a["joint_pos"][i : i + len(base["joint_pos"])], base["joint_pos"]))
-    assert set(base) == set(a) and all(np.isfinite(a[k]).all() for k in FIELDS)
+    fields = (*FIELDS, *(key for key in OBJECT_FIELDS.values() if key in base))
+    end = len(a["joint_pos"]) - n - len(base["joint_pos"])
+    for k in fields:
+        expected = np.repeat(base[k][-1:], end, axis=0)
+        if "vel" in k:
+            expected.fill(0)
+        np.testing.assert_array_equal(a[k][len(a[k])-end:], expected)
+    assert set(base) == set(a) and all(np.isfinite(a[k]).all() for k in fields)
     for k in base:
         assert a[k].dtype == base[k].dtype
         if k != "num_frames":
-            np.testing.assert_array_equal(a[k][n : n + len(base[k])] if k in FIELDS else a[k], base[k])
+            np.testing.assert_array_equal(a[k][n : n + len(base[k])] if k in fields else a[k], base[k])
+    with_box = "ext_object_pos_w" in a
+    if with_box:
+        box = list(a["body_names"]).index("largebox_link")
+        for body, obj in OBJECT_FIELDS.items():
+            for values in (a[obj], a[body][:, box]):
+                expected = np.repeat(values[n:n+1], n, axis=0)
+                if "vel" in obj:
+                    expected.fill(0)
+                np.testing.assert_array_equal(values[:n], expected)
     q = pack(m, a)
     assert len(q) == int(a["num_frames"])
     j = a["joint_pos"]
@@ -45,6 +70,7 @@ def check(m, a, base):
     feet = [[m.geom(f"{side}_foot{i}_collision").id for i in range(1, 8)] for side in ("left", "right")]
     gids = np.array(feet)
     depths, probes, leg_contacts, self_contacts, up = [], [], [], [], []
+    box_contacts = []
     for row in q:
         d.qpos[:] = row
         mj.mj_forward(m, d)
@@ -56,22 +82,29 @@ def check(m, a, base):
         depths.append((ends[:, :, :, 2] - m.geom_size[gids, 0][:, :, None]).min(axis=(1, 2)))
         probes.append(ends[:, :, :, :2])
         up.append(d.xmat[m.body("pelvis").id, 8])
-        self_min = leg_min = 0.0
+        box_min = self_min = leg_min = 0.0
         for c in d.contact:
             bodies = m.geom_bodyid[c.geom]
-            if all(bodies):
+            if with_box and m.body("largebox_link").id in bodies and all(bodies):
+                box_min = min(box_min, c.dist)
+            elif all(bodies):
                 self_min = min(self_min, c.dist)
                 names = [m.body(i).name for i in bodies]
                 if all(any(s in b for s in ("hip", "ankle", "knee")) for b in names):
                     leg_min = min(leg_min, c.dist)
+        box_contacts.append(box_min)
         leg_contacts.append(leg_min)
         self_contacts.append(self_min)
     depths, probes = np.array(depths), np.array(probes)
-    limit = m.jnt_range[1:]
-    violations = np.maximum(q[:, 7:] - limit[:, 1], limit[:, 0] - q[:, 7:]).max(axis=1)
-    for name, sl in (("prefix", slice(0, n)), ("original", slice(n, n + len(base["joint_pos"])))):
+    limit = m.jnt_range[1:30]
+    violations = np.maximum(q[:, 7:36] - limit[:, 1], limit[:, 0] - q[:, 7:36]).max(axis=1)
+    phases = [("prefix", slice(0, n)), ("original", slice(n, n + len(base["joint_pos"])))]
+    if end:
+        phases.append(("end hold", slice(-end, None)))
+    for name, sl in phases:
         print(
             name,
+            "robot-box min m", min(box_contacts[sl]),
             "sole min L/R m",
             depths[sl].min(axis=0),
             "self / leg min m",
@@ -145,12 +178,27 @@ def main():
     a = load(args.input)
     with tempfile.TemporaryDirectory() as tmp:
         xml = Path(tmp) / "scene.xml"
-        scene(args.xml, xml)
+        scene(args.xml, xml, "ext_object_pos_w" in a)
         m = mj.MjModel.from_xml_path(str(xml))
         q = check(m, a, load(args.original))
         if args.pd:
             dynamics(m, q, int(a["fps"]))
-        if args.view:
+        if args.view and "ext_object_pos_w" in a:
+            import time
+            import mujoco.viewer as viewer
+
+            data = mj.MjData(m)
+            with viewer.launch_passive(m, data) as window:
+                window.cam.lookat[:] = q[0, :3]
+                while window.is_running():
+                    for row in q:
+                        if not window.is_running():
+                            return
+                        data.qpos[:] = row
+                        mj.mj_forward(m, data)
+                        window.sync()
+                        time.sleep(1 / int(a["fps"]))
+        elif args.view:
             # UniLab expects scalar-first quats and a length-one fps array.
             view = Path(tmp) / "view.npz"
             np.savez(view, **(a | {"fps": a["fps"].reshape(1), "body_quat_w": np.roll(a["body_quat_w"], 1, axis=-1)}))

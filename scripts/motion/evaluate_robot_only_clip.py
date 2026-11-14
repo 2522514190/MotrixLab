@@ -54,13 +54,16 @@ def main():
         render=None,
     ).trainer
     trainer._set_seed(args.seed)
-    cfg = registry.make_env_config(metadata.env_name, mode="play")
+    cfg = registry.make_env_config(metadata.env_name)
+    cfg.play_training_perturbations = args.perturbations
+    cfg = cfg.for_play()
     cfg.commands.motion.sequential_clips = False
     cfg.commands.motion.hold_at_clip_end = args.hold_seconds > 0
     cfg.randomization.enabled = args.perturbations
     # Full-start evaluation isolates observation noise and optional physical DR.
-    for term in cfg.sim_reset.to_dict().values():
-        term.noise_scale = 0.0
+    if not args.perturbations:
+        for term in cfg.sim_reset.to_dict().values():
+            term.noise_scale = 0.0
     inner = NoRecoveryEnv(cfg, num_envs=1, backend=metadata.sim, seed=args.seed)
     env = FastSacNpEnvWrap(inner, torch.device("cpu"))
     agent = trainer._make_agent(env)
@@ -124,7 +127,7 @@ def main():
         success_rate=sum(e["success"] for e in episodes) / args.trials,
         criterion=f"full clip from frame zero plus {args.hold_seconds:g}s final hold without termination or recovery",
         observation_noise=True,
-        reset_noise=False,
+        reset_noise=args.perturbations,
         failure_counts=dict(Counter(r for e in episodes for r in e["reasons"])),
         episodes=episodes,
     )
