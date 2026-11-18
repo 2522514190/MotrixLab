@@ -1,0 +1,6 @@
+# @package _global_
+defaults:
+  - /task/g1-29dof-wbt-largebox-opentrack406/motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-opentrack556-end3s

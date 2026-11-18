@@ -1,0 +1,9 @@
+# @package _global_
+defaults:
+  - /task/g1-29dof-wbt-largebox-official325-critic-v2/motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-official325-critic-v2-no-root-pos-noise
+algo:
+  trainer:
+    num_learning_iterations: 50000

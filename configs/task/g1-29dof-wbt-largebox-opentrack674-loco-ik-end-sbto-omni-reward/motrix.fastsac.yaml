@@ -1,0 +1,9 @@
+# @package _global_
+defaults:
+  - /task/g1-29dof-wbt-largebox-sbto649-hold3-omni-reward/motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-opentrack674-loco-ik-end-sbto-omni-reward
+algo:
+  trainer:
+    num_learning_iterations: 50000

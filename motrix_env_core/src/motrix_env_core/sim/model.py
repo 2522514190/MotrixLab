@@ -248,6 +248,19 @@ class BodyMassesQuery(ModelQuery):
 
 
 @dataclass(frozen=True)
+class BodyInertiasQuery(ModelQuery):
+    """Nominal link-local COM inertia tensors, ``(L, 6)`` in body link order.
+
+    Components are actual (not mass-normalized) ``xx, yy, zz, xy, xz, yz``.
+    """
+
+    body: str
+
+    def compile_with(self, compiler: SimModelCompiler, *, key: str) -> None:
+        compiler.compile_body_inertias(key, self.body)
+
+
+@dataclass(frozen=True)
 class LinkCenterOfMassQuery(ModelQuery):
     """``(3,)`` float32 nominal center-of-mass offset of one named link."""
 
@@ -378,6 +391,10 @@ class SimModelCompiler(abc.ABC):
             body: Name of the body tree whose link masses are read.
             links: Link-name subset to read, or ``None`` for the full tree.
         """
+
+    @abc.abstractmethod
+    def compile_body_inertias(self, key: str, body: str) -> None:
+        """Compile nominal COM inertia tensors in the body's link order."""
 
     @abc.abstractmethod
     def compile_link_center_of_mass(self, key: str, body: str) -> None:

@@ -18,6 +18,24 @@ from motrix_envs.locomotion.wbt.mdp.command import WbtMotionCommand
 
 
 @dispatch
+def joint_position_reward(ctx: ManagerContext, sigma: np.float32) -> float:
+    motion: WbtMotionCommand = ctx.commands["motion"]
+    diff = motion.clip.joint_pos[motion.steps[0]] - ctx.sim["robot_dof_pos"]
+    return math.exp(-float(np.mean(diff * diff)) / (sigma * sigma))
+
+
+@configclass(kw_only=True)
+class JointPositionRewardCfg(RewardTermCfg):
+    """Track actual joint angles using the mean squared reference error."""
+
+    sigma: float
+
+    def __call__(self, ctx) -> RewardTerm:
+        del ctx
+        return RewardTerm(joint_position_reward, np.float32(self.sigma))
+
+
+@dispatch
 def global_ref_position_reward(ctx: ManagerContext, sigma: np.float32) -> float:
     tracked_body_pos = ctx.sim["tracked_body_pos"]
     motion: WbtMotionCommand = ctx.commands["motion"]
