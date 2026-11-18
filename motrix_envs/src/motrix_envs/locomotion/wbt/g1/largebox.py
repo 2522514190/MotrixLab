@@ -242,6 +242,29 @@ def make_opentrack674_original_reward_cfg() -> RobotOnlyCarryEnvCfg:
     return cfg
 
 
+def _use_sbto005_no_delay(cfg: RobotOnlyCarryEnvCfg) -> RobotOnlyCarryEnvCfg:
+    default_motion = MOTION_DIR / "sub3_largebox_005_sbto_w_obj.npz"
+    cfg.commands.motion.motion_files = (os.environ.get("MOTRIX_SBTO005_MOTION", str(default_motion)),)
+    cfg.max_episode_seconds = 495 / 50
+    cfg.actions.joint_position.action_delay_steps = (0, 0)
+    return cfg
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay")
+def make_sbto005_no_delay_cfg() -> RobotOnlyCarryEnvCfg:
+    return _use_sbto005_no_delay(make_opentrack674_joint_pos_delay01_cfg())
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay-mass")
+def make_sbto005_no_delay_mass_cfg() -> RobotOnlyCarryEnvCfg:
+    return _use_sbto005_no_delay(make_opentrack674_delay01_mass_cfg())
+
+
+@registry.envcfg("g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay-mass-com")
+def make_sbto005_no_delay_mass_com_cfg() -> RobotOnlyCarryEnvCfg:
+    return _use_sbto005_no_delay(make_opentrack674_delay01_mass_com_cfg())
+
+
 @registry.envcfg("g1-29dof-wbt-largebox-fixed-feet525-omni-reward-push")
 def make_fixed_feet525_omni_reward_push_cfg() -> RobotOnlyCarryEnvCfg:
     cfg = make_opentrack406_omni_reward_push_cfg()
@@ -278,6 +301,9 @@ def make_opentrack656_stand3s_end3s_omni_reward_push_cfg() -> RobotOnlyCarryEnvC
 @registry.env("g1-29dof-wbt-largebox-opentrack674-loco-ik-end-sbto-omni-reward-joint-pos-mass-no-delay")
 @registry.env("g1-29dof-wbt-largebox-opentrack674-loco-ik-end-sbto-omni-reward-joint-pos-mass-com-no-delay")
 @registry.env("g1-29dof-wbt-largebox-opentrack674-loco-ik-end-sbto-omni-reward-joint-pos-mass-com-pd-no-delay")
+@registry.env("g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay")
+@registry.env("g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay-mass")
+@registry.env("g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay-mass-com")
 @registry.env("g1-29dof-wbt-largebox")
 class RobotOnlyCarryEnv(ManagerEnv):
     """Keep per-lane ground draws and apply the box task's velocity-kick pushes."""

@@ -1,0 +1,9 @@
+# @package _global_
+defaults:
+  - /task/g1-29dof-wbt-largebox-opentrack674-loco-ik-end-sbto-omni-reward-joint-pos-delay01-mass/motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay-mass
+algo:
+  trainer:
+    num_learning_iterations: 60000
