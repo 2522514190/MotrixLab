@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!-- From g1-mocap-free-box-locomanipulation/assets/mujoco/ground_box.xml, geom obj.
+     The motion supplies the world pose of the box center. -->
+<robot name="box_005_sbto">
+  <link name="baseLink">
+    <inertial>
+      <mass value="0.6"/>
+      <inertia ixx="0.00470125" ixy="0" ixz="0" iyy="0.00602125" iyz="0" izz="0.0028825"/>
+    </inertial>
+    <visual>
+      <geometry><box size="0.205 0.125 0.28"/></geometry>
+      <material name="cardboard"><color rgba="0.55 0.38 0.22 1"/></material>
+    </visual>
+    <collision name="largebox_collision">
+      <geometry><box size="0.205 0.125 0.28"/></geometry>
+    </collision>
+    <contact>
+      <lateral_friction value="0.6"/>
+      <spinning_friction value="0.0001"/>
+      <rolling_friction value="0.0001"/>
+    </contact>
+  </link>
+</robot>
