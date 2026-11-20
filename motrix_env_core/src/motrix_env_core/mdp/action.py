@@ -59,8 +59,15 @@ class JointPositionActionTerm(ActionTerm):
 
     state: JointPositionActionState
 
-    def __init__(self, space: gym.spaces.Box, state: JointPositionActionState) -> None:
+    def __init__(
+        self, space: gym.spaces.Box, state: JointPositionActionState, safety_clip_fraction: float | None = None
+    ) -> None:
         super().__init__(space, state)
+        self._target_limits = None
+        if safety_clip_fraction is not None:
+            midpoint = (state.joint_lower + state.joint_upper) * 0.5
+            half_range = (state.joint_upper - state.joint_lower) * (0.5 * safety_clip_fraction)
+            self._target_limits = (midpoint - half_range, midpoint + half_range)
         # Seeded generator driving reset-time delay resampling; lives on the
         # term (not the kernel-data state) because it is host-only.
         self.generator = torch.Generator()
@@ -81,7 +88,10 @@ class JointPositionActionTerm(ActionTerm):
             width = queue.shape[1]
             delay_indices = (ptr - state.delay_steps) % width
             target_raw = torch.take_along_dim(queue, delay_indices[:, None, None], dim=1)[:, 0, :]
-        return target_raw * state.action_scales + state.default_angles
+        target = target_raw * state.action_scales + state.default_angles
+        if self._target_limits is not None:
+            target = target.clamp(*self._target_limits)
+        return target
 
     def _reset(self, env_ids: torch.Tensor) -> None:
         """Resample per-episode delay after the base term clears raw history."""
@@ -110,13 +120,18 @@ class JointPositionActionCfg(ActionCfg):
         action_delay_steps: Inclusive per-lane control-step delay range
             ``(lo, hi)``, resampled at reset; ``(0, 0)`` disables delayed
             target lookup but still retains current and previous raw actions.
+        safety_clip_fraction: Fraction of the joint range retained around its midpoint.
+            None leaves the affine targets unclipped.
     """
 
     action_scale: float = 0.25
     action_scales_by_effort_limit_over_p_gain: bool = False
     action_delay_steps: tuple[int, int] = (0, 0)
+    safety_clip_fraction: float | None = None
 
     def __call__(self, ctx: BuildContext, actuators: tuple[ActuatorSpec, ...] | None) -> JointPositionActionTerm:
+        if self.safety_clip_fraction is not None and not 0.0 < self.safety_clip_fraction <= 1.0:
+            raise ValueError("safety_clip_fraction must be in (0, 1] or None")
         model = ctx.model
         if actuators is None:
             actuators = model.actuators
@@ -168,7 +183,7 @@ class JointPositionActionCfg(ActionCfg):
         space = joint_position_action_space_from_ctrl_ranges(
             torch.tensor(ctrl_ranges, dtype=torch.float32), state.default_angles.cpu(), state.action_scales.cpu()
         )
-        term = JointPositionActionTerm(space, state)
+        term = JointPositionActionTerm(space, state, self.safety_clip_fraction)
         # Reset-time delay resampling is reproducible per environment seed.
         term.generator.manual_seed(ctx.seed + 0x5EED)
         return term

@@ -266,6 +266,16 @@ class BodyMassesQuery(ModelQuery):
 
 
 @dataclass(frozen=True)
+class LinkInertiaQuery(ModelQuery):
+    """Actual link-local inertia in xx, yy, zz, xy, xz, yz order."""
+
+    name: str
+
+    def compile_with(self, compiler: SimModelCompiler, *, key: str) -> None:
+        compiler.compile_link_inertia(key, self.name)
+
+
+@dataclass(frozen=True)
 class LinkCenterOfMassQuery(ModelQuery):
     """``(3,)`` float32 nominal center-of-mass offset of one named link."""
 
@@ -406,6 +416,9 @@ class SimModelCompiler(abc.ABC):
             body: Name of the body tree whose link masses are read.
             links: Link-name subset to read, or ``None`` for the full tree.
         """
+
+    def compile_link_inertia(self, key: str, link: str) -> None:
+        raise NotImplementedError("This backend does not support querying link inertia.")
 
     @abc.abstractmethod
     def compile_link_center_of_mass(self, key: str, body: str) -> None:

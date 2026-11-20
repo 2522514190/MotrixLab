@@ -28,6 +28,7 @@ from motrix_env_core.sim.write import (
     KinematicBodyPositionWrite,
     KinematicBodyRotationWrite,
     LinkComWrite,
+    LinkInertiaWrite,
     LinkMassWrite,
     SimWriteCompiler,
     WriteProgram,
@@ -46,17 +47,19 @@ class _CompiledWrite:
 class MotrixSimWriteCompiler(SimWriteCompiler):
     """Compile neutral write declarations against one MotrixSim model and data batch.
 
-    Every write compiles into one native write plan; reset and
-    forward-kinematics behavior are baked into the plan at compile time.
+    Native fields share one write plan. Inertia is applied through the link API
+    after the plan, including when the plan resets selected rows.
     """
 
     def __init__(self, model: mtx.SceneModel, data: mtx.SceneData) -> None:
         self._model = model
         self._data = data
         self._pending: list[tuple[str, _CompiledWrite]] = []
+        self._inertia_writes: dict[str, tuple[mtx.Link, ...]] = {}
 
     def _begin_compile(self) -> None:
-        self._pending = []
+        self._pending.clear()
+        self._inertia_writes = {}
 
     def _build_program(self, *, reset: bool, forward_kinematics: bool) -> WriteProgram:
         native_fields: dict[str, mtx_write.WriteSource] = {}
@@ -75,7 +78,7 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
             refresh_kinematics |= compiled.refresh_kinematics
         buffers: dict[str, torch.Tensor] = {}
         native_program = None
-        if native_fields:
+        if native_fields or (self._inertia_writes and reset):
             # Reset (restore defaults, then apply the writes) and the FK pass
             # are baked into the native plan at compile time.
             refresh = forward_kinematics and (reset or refresh_kinematics)
@@ -84,7 +87,9 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
             )
             for name in native_fields:
                 buffers[name] = torch.from_numpy(native_program[name])
-        return _MotrixSimWriteProgram(self._data, buffers, native_program)
+        for name, links in self._inertia_writes.items():
+            buffers[name] = torch.zeros((*self._data.shape, len(links), 6), dtype=torch.float32)
+        return _MotrixSimWriteProgram(self._data, buffers, native_program, self._inertia_writes)
 
     def compile_body_joint_position(self, name: str, write: BodyJointPositionWrite) -> None:
         body = _named_body(self._model, write.body)
@@ -247,6 +252,10 @@ class MotrixSimWriteCompiler(SimWriteCompiler):
         self._targets(name, write.links, "link", _named_link)
         self._pending.append((name, _CompiledWrite(native=mtx_write.LinkMassOverride(list(write.links)))))
 
+    def compile_link_inertia(self, name: str, write: LinkInertiaWrite) -> None:
+        self._targets(name, write.links, "link", _named_link)
+        self._inertia_writes[name] = tuple(_named_link(self._model, link) for link in write.links)
+
     def compile_link_com(self, name: str, write: LinkComWrite) -> None:
         self._targets(name, write.links, "link", _named_link)
         self._pending.append((name, _CompiledWrite(native=mtx_write.LinkCenterOfMassOverride(list(write.links)))))
@@ -341,12 +350,14 @@ class _MotrixSimWriteProgram(WriteProgram):
         data: mtx.SceneData,
         buffers: dict[str, torch.Tensor],
         native_program: mtx_write.WriteProgram | None = None,
+        inertia_writes: dict[str, tuple[mtx.Link, ...]] | None = None,
     ) -> None:
         self._data = data
         # The tensors alias the native program's numpy buffer storage; writes
         # through them reach the native side directly.
         self._tensors = dict(buffers)
         self._native_program = native_program
+        self._inertia_writes = inertia_writes or {}
 
     def buffer(self, name: str) -> torch.Tensor:
         return self._tensors[name]
@@ -366,8 +377,18 @@ class _MotrixSimWriteProgram(WriteProgram):
                 return
         else:
             ids = None
+        selected = None if ids is None else np.sort(ids)
         if self._native_program is not None:
-            self._native_program.execute(self._data, env_ids=None if ids is None else np.sort(ids))
+            self._native_program.execute(self._data, env_ids=selected)
+
+        if self._inertia_writes:
+            data = self._data if selected is None else self._data[mtx.DisjointIndices(selected)]
+            for name, links in self._inertia_writes.items():
+                values = self._tensors[name].numpy()
+                if selected is not None:
+                    values = values[selected]
+                for column, link in enumerate(links):
+                    link.set_inertia_override(data, values[:, column, :])
 
 
 def _named_body(model: mtx.SceneModel, body_name: str):

@@ -136,6 +136,10 @@ class MotrixSimModelCompiler(SimModelCompiler):
                 raise KeyError(f"Link {exc.args[0]!r} is not part of body {body!r}.") from None
         self._others[key] = torch.as_tensor(masses, dtype=torch.float32)
 
+    def compile_link_inertia(self, key: str, link: str) -> None:
+        nominal = mtx.SceneData(self._model, batch=[1])
+        self._others[key] = torch.from_numpy(_named_link(self._model, link).get_inertia_override(nominal)[0])
+
     def compile_link_center_of_mass(self, key: str, body: str) -> None:
         com = np.asarray(_named_link(self._model, body).center_of_mass, dtype=np.float32).reshape(3)
         self._others[key] = torch.from_numpy(com)

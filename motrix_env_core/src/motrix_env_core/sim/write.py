@@ -204,6 +204,16 @@ class LinkMassWrite(SimWrite):
 
 
 @dataclass(frozen=True)
+class LinkInertiaWrite(SimWrite):
+    """Actual link-local inertia: (N, L, 6) in xx, yy, zz, xy, xz, yz order."""
+
+    links: tuple[str, ...]
+
+    def compile_with(self, compiler: SimWriteCompiler, name: str) -> None:
+        compiler.compile_link_inertia(name, self)
+
+
+@dataclass(frozen=True)
 class LinkComWrite(SimWrite):
     """Link center-of-mass overrides in declared order: ``(N, L, 3)``."""
 
@@ -323,6 +333,9 @@ class SimWriteCompiler(abc.ABC):
     @abc.abstractmethod
     def compile_link_mass(self, name: str, write: LinkMassWrite) -> None:
         """Record body mass overrides."""
+
+    def compile_link_inertia(self, name: str, write: LinkInertiaWrite) -> None:
+        raise NotImplementedError("This backend does not support writing link inertia.")
 
     @abc.abstractmethod
     def compile_link_com(self, name: str, write: LinkComWrite) -> None:

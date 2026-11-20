@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - /algo_base@algo: motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-sbto005-teacher
+  rllib: motrix
+  algo: fastsac
+  train_backend: torch
+num_envs: 2048
+play_num_envs: 16
+seed: 2
+logging:
+  backend: tensorboard
+  interval: 100
+checkpoint:
+  interval: 1000
+algo:
+  agent:
+    tau: 0.05
+    target_entropy_ratio: 0.5
+    policy_frequency: 2
+    num_updates: 4
+    num_atoms: 501
+    v_min: -40.0
+    v_max: 40.0
+    gamma: 0.99
+  trainer:
+    num_learning_iterations: 100000
+    async_options:
+      utd_mode: strict
