@@ -117,6 +117,17 @@ class MotrixSimModelCompiler(SimModelCompiler):
                 raise KeyError(f"Link {exc.args[0]!r} is not part of body {body!r}.") from None
         self._others[key] = np.asarray(masses, dtype=np.float32)
 
+    def compile_body_inertias(self, key: str, body: str) -> None:
+        scene_body = self._model.get_body(body)
+        if scene_body is None:
+            raise KeyError(f"Unknown body {body!r}.")
+        # A fresh single-lane data object exposes effective nominal tensors,
+        # including URDF inertial rotations, without reading live overrides.
+        nominal = mtx.SceneData(self._model, batch=[1])
+        self._others[key] = np.asarray(
+            [link.get_inertia_override(nominal)[0] for link in scene_body.links], dtype=np.float32
+        )
+
     def compile_link_center_of_mass(self, key: str, body: str) -> None:
         self._others[key] = np.asarray(_named_link(self._model, body).center_of_mass, dtype=np.float32).reshape(3)
 

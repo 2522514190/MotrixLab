@@ -56,6 +56,7 @@ from motrix_envs.locomotion.wbt.g1.common import (
     G1WbtEnvCfg,
     G1WbtSceneObjsCfg,
 )
+from motrix_env_core.config.scene.urdf import UrdfGeomCfg
 from motrix_envs.locomotion.wbt.mdp.command import WbtMotionCommandCfg
 from motrix_envs.locomotion.wbt.mdp.object import (
     OBJECT_CHANNELS,
@@ -205,7 +206,7 @@ class OmniRandomizationCfg:
     enabled: bool = True
     # Keep the box physical domain randomization moderate while retaining the
     # nominal pose and the ability to learn contact robustness.
-    object_mass: tuple[float, float] = (0.1, 0.5)
+    object_mass: tuple[float, float] = (0.6, 0.6)
     object_com: tuple[float, float, float] = (0.02, 0.02, 0.02)
     object_inertia_scale: tuple[float, float] = (0.8, 1.2)
     # Holosoma's object material DR motivates this range; it is narrowed here
@@ -233,7 +234,7 @@ class ObjectCurriculumCfg:
     # For the FastSAC carrying experiment, gate on genuinely full-start episodes only.
     from_zero_only: bool = False
     # Reference-frame denominator used by full-start survival curriculum.
-    reference_frames: int = 325
+    reference_frames: int = 495
     # Whether delayed object tracking failure termination is active.
     error_termination_enabled: bool = True
 
@@ -248,7 +249,7 @@ class OmniRetargetEnvCfg(G1WbtEnvCfg):
     ctrl_dt: float = 0.02
     commands: CommandsCfg = CommandsCfg(
         motion=WbtMotionCommandCfg(
-            motion_files=(str(MOTION_DIR / "sub3_largebox_003_w_obj.npz"),),
+            motion_files=(str(MOTION_DIR / "sub3_largebox_005_sbto_w_obj.npz"),),
             extension_channels=OBJECT_CHANNELS,
             adaptive_sampling_enabled=True,
             start_at_timestep_zero_prob=0.0,
@@ -308,7 +309,10 @@ class OmniRetargetEnvCfg(G1WbtEnvCfg):
         # Clean playback can still be selected explicitly.
         cfg.observations.policy.motion_ref_ori_b.noise.amplitude = 0.0
         cfg.observations.policy.base_ang_vel.noise.amplitude = 0.0
-        cfg.observations.policy.dof_pos.noise = 0.0
+        if isinstance(cfg.observations.policy.dof_pos, CalibratedPositionObsCfg):
+            cfg.observations.policy.dof_pos.noise = 0.0
+        else:
+            cfg.observations.policy.dof_pos.noise.amplitude = 0.0
         cfg.observations.policy.dof_vel.noise.amplitude = 0.0
         return cfg
 
@@ -322,7 +326,8 @@ def make_omniretarget_cfg() -> OmniRetargetEnvCfg:
     # 箱子配置
     cfg.scene.objs.box = BodyCfg(
         model=UrdfFileCfg(
-            file=LARGE_BOX_DIR / "large_box_omniretarget.urdf",
+            file=LARGE_BOX_DIR / "box_005_sbto.urdf",
+            geoms=[UrdfGeomCfg(geom_name="largebox_collision", friction=(0.6, 0.0001, 0.0001), condim=3)],
         ),
         base_link_name="baseLink",
     )
@@ -361,11 +366,11 @@ class OmniRetargetEnv(ManagerEnv):
         )
         dr = cfg.randomization
         rng = self._dr_rng
-        mass = rng.uniform(*dr.object_mass, size=num_envs) if dr.enabled else np.full(num_envs, 0.1)
+        mass = rng.uniform(*dr.object_mass, size=num_envs) if dr.enabled else np.full(num_envs, 0.6)
         factor = rng.uniform(*dr.object_inertia_scale, size=num_envs) if dr.enabled else np.ones(num_envs)
         self._domain_writes.buffer("mass")[:, 0] = mass
-        # Holosoma scales the nominal inertia with mass, then randomizes inertia.
-        self._domain_writes.buffer("inertia")[:, 0, :3] = (mass * 0.02 * factor)[:, None]
+        # Scale the uniform box inertia by its sampled mass and inertia factor.
+        self._domain_writes.buffer("inertia")[:, 0, :3] = (mass * factor)[:, None] * np.asarray((0.125**2 + 0.28**2, 0.205**2 + 0.28**2, 0.205**2 + 0.125**2)) / 12.0
         friction = np.tile(self.model.others["box_friction"], (num_envs, 1))
         if dr.enabled:
             friction[:, 0] = rng.uniform(*dr.object_sliding_friction, size=num_envs)

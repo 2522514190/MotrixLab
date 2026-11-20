@@ -49,8 +49,8 @@ def pack(m, a):
     q[:, joint_addresses(m, a)] = a["joint_pos"]
     if m.nq == 43:
         adr = int(m.joint("box_free").qposadr[0])
-        q[:, adr:adr+3] = a["ext_object_pos_w"]
-        q[:, adr+3:adr+7] = np.roll(a["ext_object_quat_w"], 1, axis=-1)
+        q[:, adr : adr + 3] = a["ext_object_pos_w"]
+        q[:, adr + 3 : adr + 7] = np.roll(a["ext_object_quat_w"], 1, axis=-1)
     return q
 
 
@@ -147,7 +147,7 @@ def fk(m, rows, ids):
 OBJECT_FIELDS = {k: k.replace("body_", "ext_object_") for k in FIELDS if k.startswith("body_")}
 
 
-def build_with_box(args, a):
+def build_with_box(args, a, solver=solve):
     box = a["body_names"].tolist().index("largebox_link")
     robot = dict(a)
     for body, obj in OBJECT_FIELDS.items():
@@ -156,7 +156,7 @@ def build_with_box(args, a):
         robot[body] = np.delete(a[body], box, axis=1)
         del robot[obj]
     robot["body_names"] = np.delete(a["body_names"], box)
-    out, n = build(args, robot)
+    out, n = build(args, robot, solver)
     end = len(out["joint_pos"]) - n - len(a["joint_pos"])
     for body, obj in OBJECT_FIELDS.items():
         before = np.repeat(a[obj][:1], n, axis=0)
@@ -175,9 +175,9 @@ def build_with_box(args, a):
     return out, n
 
 
-def build(args, a):
+def build(args, a, solver=solve):
     if "largebox_link" in a["body_names"]:
-        return build_with_box(args, a)
+        return build_with_box(args, a, solver)
     if {k for k in a if a[k].ndim and len(a[k]) == len(a["joint_pos"])} != set(FIELDS):
         raise ValueError("Unsupported motion channels; expected robot-only v1")
     fps = int(a["fps"])
@@ -187,7 +187,7 @@ def build(args, a):
     pos, quat = fk(m, original, ids)
     np.testing.assert_allclose(pos, a["body_pos_w"], atol=2e-6)
     np.testing.assert_allclose(abs((quat * a["body_quat_w"]).sum(-1)), 1, atol=2e-6)
-    prefix, adr = solve(args, a)
+    prefix, adr = solver(args, a)
     q = np.repeat(original[:1], len(prefix), axis=0)
     q[:, :7] = prefix[:, :7]
     q[:, joint_addresses(m, a)] = prefix[:, adr]

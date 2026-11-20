@@ -16,7 +16,7 @@ from motrix_env_core.sim import (
     LinkMassQuery,
     SimModelCompiler,
 )
-from motrix_env_core.sim.model import SimModel
+from motrix_env_core.sim.model import BodyInertiasQuery, SimModel
 
 
 class _DispatchCompiler(SimModelCompiler):
@@ -62,6 +62,10 @@ class _DispatchCompiler(SimModelCompiler):
         del body, links
         self.dispatched[key] = "masses"
 
+    def compile_body_inertias(self, key, body) -> None:
+        del body
+        self.dispatched[key] = "inertias"
+
     def compile_geom_friction(self, key, geom) -> None:
         del geom
         self.dispatched[key] = "friction"
@@ -80,6 +84,7 @@ def test_model_queries_dispatch_to_typed_compiler_methods() -> None:
         "kp": ActuatorKpQuery(names=("first", "second")),
         "kd": ActuatorKdQuery(names=None),
         "mass": LinkMassQuery(name="body"),
+        "inertias": BodyInertiasQuery(body="body"),
         "com": LinkCenterOfMassQuery(name="body"),
         "friction": GeomFrictionQuery(name="geom"),
         "heightfield": HeightFieldDataQuery(geom="floor"),

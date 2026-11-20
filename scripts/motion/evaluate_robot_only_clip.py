@@ -39,12 +39,19 @@ def main():
     parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--perturbations", action="store_true")
     parser.add_argument("--hold-seconds", type=float, default=5.0)
+    parser.add_argument("--push", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args()
+    if args.push and not args.perturbations:
+        parser.error("--push requires --perturbations")
     found = runs.find_metadata_for_policy(args.policy)
     if found is None or args.trials < 1 or args.hold_seconds < 0:
         parser.error("a metadata-backed checkpoint and positive trial count are required")
     run_dir, metadata = found
-    if metadata.env_name not in ("g1-29dof-wbt-largebox", "g1-29dof-wbt-largebox-opentrack406"):
+    if metadata.env_name not in (
+        "g1-29dof-wbt-largebox",
+        "g1-29dof-wbt-largebox-opentrack406",
+        "g1-29dof-wbt-largebox-opentrack406-omni-reward-push",
+    ):
         parser.error("expected the robot-only largebox task")
     trainer = runner.create_run_handle(
         runs.open_run_context(run_dir, metadata),
@@ -56,7 +63,10 @@ def main():
     trainer._set_seed(args.seed)
     cfg = registry.make_env_config(metadata.env_name)
     cfg.play_training_perturbations = args.perturbations
+    if args.push is not None:
+        cfg.randomization.push_enabled = args.push
     cfg = cfg.for_play()
+    cfg.commands.motion.start_at_timestep_zero_prob = 1.0
     cfg.commands.motion.sequential_clips = False
     cfg.commands.motion.hold_at_clip_end = args.hold_seconds > 0
     cfg.randomization.enabled = args.perturbations
@@ -78,7 +88,10 @@ def main():
         frames = len(motion.clip.joint_pos)
         # Stop upon reaching the final reference frame, before clip wrap rematerialization.
         steps = frames - 1 if args.hold_seconds == 0 else frames + round(args.hold_seconds / cfg.ctrl_dt)
+        assert motion.steps[0, 0] == 0
         error_sq = 0.0
+        anchor_sq = relative_sq = action_delta_sq = 0.0
+        previous_action = np.zeros_like(term.state.default_angles)
         clipped = violated = total = 0
         max_violation = 0.0
         reasons = []
@@ -87,11 +100,19 @@ def main():
             with torch.inference_mode():
                 actions = agent.act(obs, deterministic=True)
             raw = actions.cpu().numpy()
+            action_delta_sq += float(np.sum((raw - previous_action) ** 2))
+            previous_action = raw.copy()
             target = raw * term.state.action_scales + term.state.default_angles
             lo, hi = term._target_limits
             clipped += int(np.count_nonzero((target < lo) | (target > hi)))
             result = env.step(actions)
             obs = result.obs
+            tracked = inner.sim_data["tracked_body_pos"][0]
+            reference_frame = int(motion.steps[0, 0])
+            anchor_sq += float(
+                np.sum((tracked[motion.reference_index] - motion.clip.reference_body_pos_w[reference_frame]) ** 2)
+            )
+            relative_sq += float(np.mean(np.sum((tracked - motion.target_body_position_relative[0]) ** 2, axis=-1)))
             q = inner.sim_data["robot_dof_pos"][0]
             error_sq += float(np.sum((q - motion.clip.joint_pos[frame]) ** 2))
             violation = np.maximum(term.state.joint_lower - q, 0) + np.maximum(q - term.state.joint_upper, 0)
@@ -109,6 +130,9 @@ def main():
             reference_frame=frame,
             reasons=reasons,
             joint_tracking_rmse_rad=float(np.sqrt(error_sq / total)),
+            anchor_rmse_m=float(np.sqrt(anchor_sq / (tick + 1))),
+            relative_body_rmse_m=float(np.sqrt(relative_sq / (tick + 1))),
+            mean_action_delta_sq=action_delta_sq / (tick + 1),
             target_clip_fraction=clipped / total,
             actual_joint_violation_fraction=violated / total,
             max_actual_joint_violation_rad=max_violation,

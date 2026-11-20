@@ -1,0 +1,179 @@
+--- a/src/backend.hpp
++++ b/src/backend.hpp
+@@ -50,6 +50,12 @@
+       bool validate_crc, int subscriber_queue_depth);
+   ~G1Backend();
+ 
++  void enable_timing();
++  void timing_source(std::int64_t receive_ns, std::int64_t step_ns);
++  std::vector<std::array<std::int64_t, 6>> timing_rows() const;
++  std::uint64_t timing_dropped() const;
++  std::vector<std::array<double, 60>> feedback_rows() const;
++  std::vector<std::array<std::int64_t, 4>> writer_rows() const;
+   void open(double connect_timeout_s);
+   StateSnapshot read_state();
+   void write_command(const std::array<float, 29>& position,
+@@ -120,6 +126,14 @@
+   bool opened_ = false;
+   bool closed_ = false;
+ 
++  std::vector<std::array<double, 60>> feedback_rows_;
++  std::vector<std::array<std::int64_t, 4>> writer_rows_;
++  std::uint64_t feedback_overwrites_ = 0, writer_overwrites_ = 0;
++  bool timing_enabled_ = false;
++  std::int64_t timing_receive_ = 0, timing_step_ = 0, timing_id_ = 0;
++  std::int64_t command_receive_ = 0, command_step_ = 0;
++  std::uint64_t timing_dropped_ = 0;
++  std::vector<std::array<std::int64_t, 6>> timing_rows_;
+   std::atomic<bool> writer_stop_{false};
+   std::thread writer_thread_;
+ };
+--- a/src/backend.cpp
++++ b/src/backend.cpp
+@@ -200,6 +200,17 @@
+   {
+     std::lock_guard<std::mutex> lock(mutex_);
+     snapshot.sequence = ++sequence_;
++    if (timing_enabled_) {
++      std::array<double, 60> row{};
++      row[0] = receive_time_ns;
++      row[1] = state.tick();
++      for (int i = 0; i < kMotorCount; ++i) {
++        row[2+i] = snapshot.joint_position[i];
++        row[31+i] = snapshot.joint_velocity[i];
++      }
++      if (feedback_rows_.size() < 100000) feedback_rows_.push_back(row);
++      else { feedback_rows_[feedback_overwrites_++ % 100000] = row; ++timing_dropped_; }
++    }
+     latest_state_ = snapshot;
+     have_state_ = true;
+     mode_ok_ = true;
+@@ -247,6 +258,41 @@
+   enabled_ = true;
+   stopped_ = false;
+   last_command_update_ns_ = now_ns();
++  if (timing_enabled_) {
++    ++timing_id_;
++    command_receive_ = timing_receive_;
++    command_step_ = timing_step_;
++  }
++}
++
++void G1Backend::enable_timing() {
++  std::lock_guard<std::mutex> lock(mutex_);
++  timing_rows_.reserve(100000);
++  feedback_rows_.reserve(100000);
++  writer_rows_.reserve(100000);
++  timing_enabled_ = true;
++}
++void G1Backend::timing_source(std::int64_t receive_ns, std::int64_t step_ns) {
++  std::lock_guard<std::mutex> lock(mutex_);
++  timing_receive_ = receive_ns;
++  timing_step_ = step_ns;
++}
++std::vector<std::array<std::int64_t, 6>> G1Backend::timing_rows() const {
++  std::lock_guard<std::mutex> lock(mutex_);
++  return timing_rows_;
++}
++std::uint64_t G1Backend::timing_dropped() const {
++  std::lock_guard<std::mutex> lock(mutex_);
++  return timing_dropped_;
++}
++
++std::vector<std::array<double, 60>> G1Backend::feedback_rows() const {
++  std::lock_guard<std::mutex> lock(mutex_);
++  return feedback_rows_;
++}
++std::vector<std::array<std::int64_t, 4>> G1Backend::writer_rows() const {
++  std::lock_guard<std::mutex> lock(mutex_);
++  return writer_rows_;
+ }
+ 
+ void G1Backend::write_torque(const std::array<float, 29>& torque) {
+@@ -379,10 +425,15 @@
+ }
+ 
+ void G1Backend::command_writer_loop() {
++  std::int64_t recorded_id = 0;
+   auto next = std::chrono::steady_clock::now();
+   while (!writer_stop_.load()) {
+     next += command_period_;
+     LowCmd outgoing;
++    std::array<std::int64_t, 6> timing{};
++    bool record = false;
++    bool active = false;
++    std::int64_t writer_id = 0;
+     {
+       std::lock_guard<std::mutex> lock(mutex_);
+       const auto now = now_ns();
+@@ -392,10 +443,30 @@
+         set_damping_locked();
+       }
+       outgoing = command_;
++      writer_id = timing_id_;
++      active = enabled_ && !stopped_ && mode_ok_ && !state_stale && !command_stale;
++      record = timing_enabled_ && enabled_ && !stopped_ && mode_ok_ && !state_stale && !command_stale
++               && timing_id_ != recorded_id && command_receive_ > 0;
++      if (record) timing = {timing_id_, command_receive_, command_step_, last_command_update_ns_, 0, 0};
+     }
+     // CRC and the DDS write happen outside the lock: the policy loop and
+     // read_state() must never wait on transport I/O.
+-    publish(outgoing);
++    if (record) timing[4] = now_ns();
++    const auto writer_start = now_ns();
++    const bool sent = publish(outgoing);
++    const auto writer_end = now_ns();
++    if (timing_enabled_) {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (writer_rows_.size() < 100000) writer_rows_.push_back({writer_start, writer_end, writer_id, sent ? (active ? 1 : 2) : 0});
++      else { writer_rows_[writer_overwrites_++ % 100000] = {writer_start, writer_end, writer_id, sent ? (active ? 1 : 2) : 0}; ++timing_dropped_; }
++    }
++    if (record && sent) {
++      timing[5] = writer_end;
++      std::lock_guard<std::mutex> lock(mutex_);
++      recorded_id = timing[0];
++      if (timing_rows_.size() < 100000) timing_rows_.push_back(timing);
++      else ++timing_dropped_;
++    }
+     std::this_thread::sleep_until(next);
+     if (std::chrono::steady_clock::now() > next + command_period_) next = std::chrono::steady_clock::now();
+   }
+--- a/src/bindings.cpp
++++ b/src/bindings.cpp
+@@ -71,6 +71,36 @@
+           py::arg("damping_kd") = 3.0, py::arg("command_period_s") = 0.001,
+           py::arg("command_timeout_s") = 0.1, py::arg("state_timeout_s") = 0.1,
+           py::arg("validate_crc") = true, py::arg("subscriber_queue_depth") = 10)
++      .def("enable_timing", &G1Backend::enable_timing)
++      .def("timing_source", &G1Backend::timing_source)
++      .def("timing_dropped", &G1Backend::timing_dropped)
++      .def("feedback_rows", [](const G1Backend& backend) {
++        py::list result;
++        for (const auto& row : backend.feedback_rows()) {
++          py::list values;
++          for (auto value : row) values.append(value);
++          result.append(values);
++        }
++        return result;
++      })
++      .def("writer_rows", [](const G1Backend& backend) {
++        py::list result;
++        for (const auto& row : backend.writer_rows()) {
++          py::list values;
++          for (auto value : row) values.append(value);
++          result.append(values);
++        }
++        return result;
++      })
++      .def("timing_rows", [](const G1Backend& backend) {
++        py::list rows;
++        for (const auto& row : backend.timing_rows()) {
++          py::list values;
++          for (auto value : row) values.append(value);
++          rows.append(values);
++        }
++        return rows;
++      })
+       .def("open", [](G1Backend& backend, double connect_timeout_s) {
+         py::gil_scoped_release release;
+         backend.open(connect_timeout_s);

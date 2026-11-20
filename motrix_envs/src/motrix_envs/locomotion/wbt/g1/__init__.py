@@ -15,6 +15,7 @@ from . import (  # noqa: F401
     largebox_object,
     omniretarget,
     omniretarget_fastsac,
+    opentrack506,
 )
 
 __all__ = ["backflip", "dance", "largebox", "largebox_object", "omniretarget", "omniretarget_fastsac"]

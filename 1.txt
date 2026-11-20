@@ -6,14 +6,21 @@ mxlab export-deploy run_dir="$run_dir" checkpoint="$ckpt" output="$out"
 
 
 
-artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/artifacts/g1-29dof-wbt-largebox-omniretarget-fastsac-a-ground-action-dr05-model_latest.deploy
-mxlab deploy task=g1-largebox/sim artifact="$artifact" runtime.backend=mujoco loop=true  runtime.floor_sliding_friction=0.8  runtime.box_enabled=true
+artifact=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs_005npz/mass-com/policy.deploy
+
+mxlab deploy task=g1-largebox/sim \
+  artifact="$artifact" \
+  runtime.backend=mujoco \
+  runtime.physics.dt=0.002 \
+  loop=true \
+  runtime.floor_sliding_friction=1.0 \
+  runtime.box_enabled=false
 
 
 mxlab play \
-  env=g1-29dof-wbt-largebox\
-  policy=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs/g1-29dof-wbt-largebox/motrix/torch/fastsac/26-11-12_15-40-43-811938/checkpoints/latest.pt\
-  num_envs=4 \
+  env=g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay\
+  policy=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/runs_005npz/base/codex-box005-no-delay-20261118__4173aa9__1794997701368960/g1-29dof-wbt-largebox-sbto005-joint-pos-no-delay/motrix/torch/fastsac/26-11-18_18-28-59-230717/checkpoints/latest.pt\
+  num_envs=1 \
   ground_friction=1.0
 
 
@@ -22,8 +29,8 @@ mxlab play \
 
 uv run python scripts/motion/replay.py \
   --robot=g1-29dof \
-  --motion=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/motrix_envs/src/motrix_envs/locomotion/wbt/assets/motion/g1/sub3_largebox_003_upright_start_end_hold_745.npz \
-  --show-object \
+  --motion=/home/yudong-chen/.codex/worktrees/box-carry-training/MotrixLab/motrix_envs/src/motrix_envs/locomotion/wbt/assets/motion/g1/sub3_largebox_005_sbto_w_obj.npz \
+  --show-object=false \
   --loop \
   --speed=1
 

@@ -140,11 +140,22 @@ def robot_body_orientation_obs(ctx: ManagerContext, out: np.ndarray) -> None:
         to_matrix_first_two_rows(relative_quat, out[offset : offset + 6])
 
 
+@dispatch
+def reference_body_orientation_obs(ctx: ManagerContext, out: np.ndarray) -> None:
+    quats = ctx.sim["tracked_body_quat"]
+    reference = quats[ctx.commands["motion"].reference_index]
+    for index in range(quats.shape[0]):
+        _write_relative_orientation_6d(reference, quats[index], out[6 * index : 6 * index + 6])
+
+
 @configclass(kw_only=True)
 class RobotBodyOrientationObsCfg(ObservationTermCfg):
+    corrected_reference: bool = False
+
     def __call__(self, ctx) -> ObsTerm:
         num_tracked = len(ctx.cfg.commands.motion.tracked_body_names)
-        return ObsTerm(6 * num_tracked, robot_body_orientation_obs)
+        fn = reference_body_orientation_obs if self.corrected_reference else robot_body_orientation_obs
+        return ObsTerm(6 * num_tracked, fn)
 
 
 @kernel_data

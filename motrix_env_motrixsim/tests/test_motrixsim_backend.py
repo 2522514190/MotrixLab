@@ -33,7 +33,7 @@ from motrix_env_core.sim import (
     LinkPositionQuery,
     LinkQuaternionQuery,
 )
-from motrix_env_core.sim.model import SimModel
+from motrix_env_core.sim.model import BodyInertiasQuery, SimModel
 from motrix_env_core.sim.registry import create_sim_backend, list_sim_backends
 from motrix_env_core.sim.write import BodyJointVelocityWrite, CtrlTargetsWrite, JointVelocityWrite
 from motrix_env_motrixsim.compiler import MotrixSimSceneCompiler
@@ -223,6 +223,31 @@ def test_actuator_params_support_declared_names_or_full_model_order():
 
     with pytest.raises(KeyError, match="Unknown actuator 'missing'"):
         backend.model_compiler.compile(cfg.scene, {"kp": ActuatorKpQuery(names=("missing",))})
+
+
+def test_body_inertias_are_nominal_com_tensors_in_body_link_order():
+    from motrix_env_core import registry
+    from motrix_env_core.sim.write import LinkInertiaWrite
+
+    cfg = registry.make_env_config("go2-walk-flat", mode="play")
+    backend = MotrixSimBackend(cfg.scene, cfg.sim, 2)
+    root = cfg.scene.objs.robot.resolved_base_link_name
+    query = {"inertias": BodyInertiasQuery(body=root)}
+    model = backend.model_compiler.compile(cfg.scene, query)
+    links = model.bodies["robot"].link_names
+    tensors = model.others["inertias"]
+    assert tensors.shape == (len(links), 6)
+    for index, name in enumerate(links):
+        actual = backend._model.get_link(name).get_inertia_override(backend._data)
+        np.testing.assert_allclose(actual[0], tensors[index])
+    selected = next(i for i, tensor in enumerate(tensors) if np.all(tensor[:3] > 0))
+    program = backend.compile_writes({"inertia": LinkInertiaWrite((links[selected],))})
+    program.buffer("inertia")[:] = tensors[selected] * 1.1
+    program.execute()
+    again = backend.model_compiler.compile(cfg.scene, query)
+    np.testing.assert_array_equal(again.others["inertias"], tensors)
+    with pytest.raises(KeyError, match="Unknown body"):
+        backend.model_compiler.compile(cfg.scene, {"inertias": BodyInertiasQuery(body="missing")})
 
 
 def test_named_joint_queries_follow_declared_order():

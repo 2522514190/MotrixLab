@@ -19,6 +19,23 @@ from motrix_envs.locomotion.wbt.g1.omniretarget import OmniRetargetEnvCfg
 from motrix_envs.motion.library import expand_motion_paths
 from motrix_envs.motion.loader import MotrixMotion
 
+OPENTRACK674_DEPLOY_ENVS = tuple(
+    "g1-29dof-wbt-largebox-opentrack674-loco-ik-end-sbto-omni-reward" + suffix
+    for suffix in (
+        "",
+        "-joint-pos",
+        "-joint-pos-delay01",
+        "-joint-pos-delay01-mass",
+        "-joint-pos-delay01-mass-com",
+        "-joint-pos-delay01-mass-com-pd",
+        "-joint-pos-delay01-mass-com-pd-push",
+        "-joint-pos-mass-com-pd-push-no-delay",
+        "-joint-pos-mass-no-delay",
+        "-joint-pos-mass-com-no-delay",
+        "-joint-pos-mass-com-pd-no-delay",
+    )
+)
+
 
 def build_g1_wbt_profile(env_name: str) -> DeploymentProfile:
     """Embed actor reference channels and hardware-observable safety thresholds."""
@@ -92,9 +109,14 @@ def build_g1_wbt_profile(env_name: str) -> DeploymentProfile:
             ),
             joint_velocities=dict(zip(robot.joint_names, joint_vel[0].tolist())),
         )
-    staged = env_name == "g1-29dof-wbt-largebox-opentrack406"
+    final_stand = env_name in OPENTRACK674_DEPLOY_ENVS
+    staged = final_stand or env_name in (
+        "g1-29dof-wbt-largebox-opentrack406",
+        "g1-29dof-wbt-largebox-opentrack556-end3s",
+    )
     task = G1WbtTaskSpec(
         staged_start=staged,
+        final_stand=final_stand,
         preparation_joint_position=joint_pos[0].tolist() if staged else None,
         simulation_initial_state=None if staged else initial,
         action_safety_clip_fraction=action.safety_clip_fraction if action.safety_clip_fraction is not None else 1.0,

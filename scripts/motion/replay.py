@@ -68,12 +68,17 @@ _SPEED = flags.DEFINE_float("speed", 1.0, "Playback speed multiplier (>0).", low
 _SHOW_OBJECT = flags.DEFINE_bool("show-object", False, "Show the reference object when ext_object_* channels exist.")
 
 
+_OBJECT_MODEL = flags.DEFINE_string("object-model", None, "Object URDF path for reference replay.")
+
+
 @configclass
 class ReplaySceneObjsCfg(StandardSceneObjsCfg):
     box: BodyCfg | None = None
 
 
-def build_replay_model(robot_cfg: RobotCfg, *, show_object: bool = False) -> mtx.SceneModel:
+def build_replay_model(
+    robot_cfg: RobotCfg, *, show_object: bool = False, object_model: str | Path | None = None
+) -> mtx.SceneModel:
     """Build a standard ground scene containing only the requested robot."""
     scene = StandardSceneCfg(
         system_camera=SystemCameraCfg(distance=6.0, elevation=-20.0, azimuth=180.0),
@@ -82,7 +87,9 @@ def build_replay_model(robot_cfg: RobotCfg, *, show_object: bool = False) -> mtx
             box=(
                 BodyCfg(
                     model=UrdfFileCfg(
-                        file=Path(__file__).resolve().parents[2]
+                        file=Path(object_model).expanduser()
+                        if object_model
+                        else Path(__file__).resolve().parents[2]
                         / "motrix_envs/src/motrix_envs/locomotion/wbt/assets/objects/largebox/large_box.urdf"
                     ),
                     base_link_name="baseLink",
@@ -191,13 +198,14 @@ def replay(
     loop: bool = False,
     speed: float = 1.0,
     show_object: bool = False,
+    object_model: str | Path | None = None,
 ) -> None:
     """Replay a motion using only its file and the robot configuration."""
     motion = MotrixMotion(motion_path)
     object_enabled = show_object and all(
         name in motion.extensions for name in ("object_pos_w", "object_quat_w", "object_lin_vel_w", "object_ang_vel_w")
     )
-    model = build_replay_model(robot_cfg, show_object=object_enabled)
+    model = build_replay_model(robot_cfg, show_object=object_enabled, object_model=object_model)
     joint_indices = _model_joint_indices(model, motion)
     root_index = _root_index(motion)
     start, end = _frame_range(motion, start_step, end_step)
@@ -252,6 +260,7 @@ def main(argv):
         loop=_LOOP.value,
         speed=_SPEED.value,
         show_object=_SHOW_OBJECT.value,
+        object_model=_OBJECT_MODEL.value,
     )
 
 

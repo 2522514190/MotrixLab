@@ -55,6 +55,7 @@ class G1WbtTaskSpec(TaskSpec):
         | None
     ) = None
     staged_start: bool = False
+    final_stand: bool = False
     preparation_joint_position: JointVector | None = None
     preparation_kp: GainVector | None = None
     preparation_kd: GainVector | None = None
@@ -644,8 +645,11 @@ class G1WbtDeployTask(DeployTask[None]):
                 self._enter_phase("playback")
                 # Preserve inference history; only the remaining playback budget becomes finite.
                 self.policy_controller.steps = self.policy_controller.completed_steps + self._playback_budget
-        if self._phase in {"policy_hold", "playback"}:
-            frame = self._playback_steps if self._phase == "playback" else 0
+        if self._phase == "playback" and self.spec.final_stand and self._playback_steps >= self._playback_budget:
+            self._enter_phase("final_hold")
+            self.policy_controller.steps = None
+        if self._phase in {"policy_hold", "playback", "final_hold"}:
+            frame = self._playback_steps if self._phase != "policy_hold" else 0
             self.policy_io.set_reference_frame(min(frame, len(self.motion) - 1))
             decision = self.policy_controller.step(state, context)
             self._record_decision(decision, context)

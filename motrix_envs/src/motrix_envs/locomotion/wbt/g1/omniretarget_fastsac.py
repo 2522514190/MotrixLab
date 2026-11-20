@@ -18,7 +18,7 @@ from motrix_envs.locomotion.wbt.g1.common import MOTION_DIR
 @registry.envcfg("g1-29dof-wbt-largebox-omniretarget-fastsac")
 def make_omniretarget_fastsac_cfg() -> OmniRetargetEnvCfg:
     """Build the common FastSAC carrying task configuration."""
-    return _make_motion_cfg("sub3_largebox_003_upright_start_end_hold_745.npz", 16.0)
+    return _make_motion_cfg("sub3_largebox_005_sbto_w_obj.npz", 16.0)
 
 
 def _make_motion_cfg(filename: str, episode_seconds: float) -> OmniRetargetEnvCfg:
@@ -49,8 +49,8 @@ def _make_motion_cfg(filename: str, episode_seconds: float) -> OmniRetargetEnvCf
     cfg.commands.motion.start_at_timestep_zero_prob = 0.3
     cfg.object_curriculum.from_zero_only = True
     cfg.randomize_initial_episode_progress = False
-    cfg.rewards.object_global_ref_position_error_exp.weight = 0.8
-    cfg.rewards.object_global_ref_orientation_error_exp.weight = 0.8
+    cfg.rewards.object_global_ref_position_error_exp.weight = 1.0
+    cfg.rewards.object_global_ref_orientation_error_exp.weight = 1.0
     return cfg
 
 

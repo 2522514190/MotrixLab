@@ -1,19 +1,20 @@
+# Copyright Motphys Technology Co., Ltd. 2025, 2026
+# SPDX-License-Identifier: Apache-2.0
+
 """Generate a planted-feet approach to the first largebox pose."""
+
 import argparse
 import os
 import tempfile
+from pathlib import Path
 
 import mujoco as mj
 import numpy as np
+from opentrack_start import ASSETS, SOURCE, build, fk, joint_addresses, load, pack
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation, Slerp
 
-from opentrack_start import ASSETS, SOURCE, build_with_box, fk, joint_addresses, load, pack
-import opentrack_start
-
 BASE = ASSETS / "sub3_largebox_003_w_obj.npz"
-OLD = BASE.with_stem(BASE.stem + "_opentrack_ik_start")
-OUTPUT = BASE.with_stem(BASE.stem + "_fixed_feet_start")
 
 
 def planted_prefix(args, a):
@@ -21,19 +22,21 @@ def planted_prefix(args, a):
     data = mj.MjData(model)
     feet = [model.body(side + "_ankle_roll_link").id for side in ("left", "right")]
     goal = pack(model, a)[0]
-    start = pack(model, load(OLD))[0]
+    start = pack(model, load(args.input.with_stem(args.input.stem + "_opentrack_ik_start")))[0]
     target_pos, target_quat = fk(model, [goal], feet)
     initial_pos, _ = fk(model, [start], feet)
     start[:3] += (target_pos - initial_pos).mean(axis=(0, 1))
     rotation = Slerp([0, 1], Rotation.from_quat(np.roll([start[3:7], goal[3:7]], -1, axis=1)))
     addresses = joint_addresses(model, a)
-    leg = [addr for addr, name in zip(addresses, a["joint_names"]) if any(k in name for k in ("hip_", "knee_", "ankle_"))]
+    leg = [
+        addr for addr, name in zip(addresses, a["joint_names"]) if any(k in name for k in ("hip_", "knee_", "ankle_"))
+    ]
     limits = model.jnt_range[[model.joint(a["joint_names"][addresses.index(i)]).id for i in leg]]
     frames = []
     fps = int(a["fps"])
     for t in np.arange(fps) / fps:
-        w = t**3 * (10 - 15*t + 6*t*t)
-        q = (1-w)*start + w*goal
+        w = t**3 * (10 - 15 * t + 6 * t * t)
+        q = (1 - w) * start + w * goal
         q[3:7] = np.roll(rotation(w).as_quat(), 1)
 
         def residual(x):
@@ -42,10 +45,11 @@ def planted_prefix(args, a):
             mj.mj_forward(model, data)
             actual = Rotation.from_quat(np.roll(data.xquat[feet], -1, axis=1))
             angle = (actual * Rotation.from_quat(target_quat[0]).inv()).as_rotvec()
-            return np.r_[(data.xpos[feet]-target_pos[0]).ravel(), angle.ravel()]
+            return np.r_[(data.xpos[feet] - target_pos[0]).ravel(), angle.ravel()]
 
-        solution = least_squares(residual, frames[-1][leg] if frames else q[leg], bounds=limits.T,
-                                 gtol=1e-12, ftol=1e-12, xtol=1e-12)
+        solution = least_squares(
+            residual, frames[-1][leg] if frames else q[leg], bounds=limits.T, gtol=1e-12, ftol=1e-12, xtol=1e-12
+        )
         if np.max(np.abs(residual(solution.x))) > 1e-5:
             raise ValueError(f"Unreachable foot target at {t} seconds")
         frames.append(q.copy())
@@ -53,13 +57,15 @@ def planted_prefix(args, a):
 
 
 if __name__ == "__main__":
-    args = argparse.Namespace(source_xml=SOURCE, end_hold_seconds=2)
-    a = load(BASE)
-    from unittest.mock import patch
-    with patch.object(opentrack_start, "solve", planted_prefix):
-        out, n = build_with_box(args, a)
-    with tempfile.NamedTemporaryFile(dir=OUTPUT.parent) as f:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, default=BASE)
+    args = parser.parse_args()
+    args.source_xml = SOURCE
+    args.end_hold_seconds = 2
+    output = args.input.with_stem(args.input.stem + "_fixed_feet_start")
+    out, n = build(args, load(args.input), planted_prefix)
+    with tempfile.NamedTemporaryFile(dir=output.parent) as f:
         np.savez_compressed(f, **out)
         f.flush()
-        os.link(f.name, OUTPUT)
-    print(OUTPUT, n, int(out["num_frames"]))
+        os.link(f.name, output)
+    print(output, n, int(out["num_frames"]))

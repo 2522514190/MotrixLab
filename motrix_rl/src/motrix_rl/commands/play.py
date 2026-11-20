@@ -108,8 +108,15 @@ def run(cfg: PlayConfig) -> None:
         target = _resolve_play_target(cfg)
         render = _play_render_config(target, cfg)
         env_name = target.run.metadata.env_name
-        carry = env_name in ("g1-29dof-wbt-largebox", "g1-29dof-wbt-largebox-opentrack406") or env_name.startswith(
-            "g1-29dof-wbt-largebox-omniretarget-fastsac"
+        carry = (
+            env_name in ("g1-29dof-wbt-largebox", "g1-29dof-wbt-largebox-opentrack406")
+            or env_name.startswith("g1-29dof-wbt-largebox-omniretarget-fastsac")
+            or env_name
+            in (
+                "g1-29dof-wbt-largebox-opentrack506-critic-v2",
+                "g1-29dof-wbt-largebox-official325-critic-v2",
+                "g1-29dof-wbt-largebox-official325-critic-v2-no-root-pos-noise",
+            )
         )
         env_override = (
             {"play_training_perturbations": cfg.perturbations, "play_ground_friction": cfg.ground_friction}
