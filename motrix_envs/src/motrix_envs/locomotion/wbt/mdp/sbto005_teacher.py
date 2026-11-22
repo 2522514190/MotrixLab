@@ -3,6 +3,8 @@
 
 """Batched object observations, reset and rewards for the SBTO 005 teacher."""
 
+from typing import Literal
+
 import torch
 
 from motrix_env_core.config import configclass
@@ -157,7 +159,7 @@ def hand_contact_reward(ctx: ManagerContext, hand: int) -> torch.Tensor:
     return (in_contact & reference).to(dtype=torch.float32)
 
 
-def hand_grasp_reward(ctx: ManagerContext, hand: int, box_height: float) -> torch.Tensor:
+def hand_grasp_reward(ctx: ManagerContext, hand: int, box_height: float, component: str = "product") -> torch.Tensor:
     motion = ctx.commands["motion"]
     reference = motion.clip.extensions[CONTACT_CHANNEL].data[motion.steps[:, 0], hand + 1] > 0
     report = ctx.sim["hand_box_contact_points"].reshape(reference.shape[0], 2, -1)[:, hand]
@@ -167,15 +169,19 @@ def hand_grasp_reward(ctx: ManagerContext, hand: int, box_height: float) -> torc
     normal_force = torch.where(valid, points[..., 0].clamp_min(0.0), 0.0)
     total_force = normal_force.sum(dim=-1)
 
+    force_score = ((total_force - 2.0) / 13.0).clamp(0.0, 1.0)
+    force_score *= torch.exp(-0.1 * (total_force - 20.0).clamp_min(0.0))
+    if component == "force":
+        return torch.where(reference, force_score, 0.0)
+
     offset_w = points[..., 3:6] - ctx.sim["object_pos"][:, None]
     local_z = rotate_inverse(ctx.sim["object_quat"][:, None], offset_w)[..., 2]
     height = local_z / box_height + 0.5
     height_score = ((0.95 - height) / 0.15).clamp(0.0, 1.0)
     height_score = torch.where(height >= 0.35 - 1e-6, height_score, 0.0)
     hand_height_score = (height_score * normal_force).sum(dim=-1) / total_force.clamp_min(1e-6)
-
-    force_score = ((total_force - 2.0) / 13.0).clamp(0.0, 1.0)
-    force_score *= torch.exp(-0.1 * (total_force - 20.0).clamp_min(0.0))
+    if component == "height":
+        return torch.where(reference & (total_force > 2.0), hand_height_score, 0.0)
     return torch.where(reference, hand_height_score * force_score, 0.0)
 
 
@@ -183,10 +189,11 @@ def hand_grasp_reward(ctx: ManagerContext, hand: int, box_height: float) -> torc
 class HandContactRewardCfg(RewardTermCfg):
     hand: int
     box_height: float | None = None
+    component: Literal["product", "force", "height"] = "product"
 
     def __call__(self, ctx: BuildContext) -> RewardTerm:
         if self.box_height is not None:
-            return RewardTerm(hand_grasp_reward, self.hand, self.box_height)
+            return RewardTerm(hand_grasp_reward, self.hand, self.box_height, self.component)
         return RewardTerm(hand_contact_reward, self.hand)
 
 

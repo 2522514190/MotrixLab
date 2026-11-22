@@ -127,6 +127,16 @@ class TeacherRewardsCfg(RewardsCfg):
 
 
 @configclass
+class TeacherSplitRewardsCfg(TeacherRewardsCfg):
+    left_hand_contact_height: HandContactRewardCfg = HandContactRewardCfg(
+        weight=1.0, hand=0, box_height=2 * BOX_HALF_EXTENTS[2], component="height"
+    )
+    right_hand_contact_height: HandContactRewardCfg = HandContactRewardCfg(
+        weight=1.0, hand=1, box_height=2 * BOX_HALF_EXTENTS[2], component="height"
+    )
+
+
+@configclass
 class TeacherPolicyCfg(ObservationsCfg.PolicyCfg):
     box_pose: BoxPoseObsCfg = BoxPoseObsCfg(noise=0.01)
     box_pose_error: BoxPoseObsCfg = BoxPoseObsCfg(error=True, noise=0.01)
@@ -293,10 +303,11 @@ def _box_initial_xy_noise() -> float:
 def make_sbto005_teacher_cfg() -> Sbto005TeacherCfg:
     fixed_weight = os.environ.get(HAND_CONTACT_WEIGHT_ENV_VAR)
     contact_reward = os.environ.get(HAND_CONTACT_REWARD_ENV_VAR, "binary")
-    if contact_reward not in ("binary", "grasp"):
-        raise ValueError(f"Expected {HAND_CONTACT_REWARD_ENV_VAR} to be 'binary' or 'grasp'.")
+    if contact_reward not in ("binary", "grasp", "split"):
+        raise ValueError(f"Expected {HAND_CONTACT_REWARD_ENV_VAR} to be 'binary', 'grasp', or 'split'.")
     cfg = Sbto005TeacherCfg(
         motion_files=(str(_motion_path()),),
+        rewards=TeacherSplitRewardsCfg() if contact_reward == "split" else TeacherRewardsCfg(),
         hand_contact_curriculum=_hand_contact_curriculum() if fixed_weight is None else None,
     )
     if fixed_weight is not None:
@@ -316,7 +327,7 @@ def make_sbto005_teacher_cfg() -> Sbto005TeacherCfg:
     cfg.scene.objs = TeacherSceneObjsCfg(robot=cfg.scene.objs.robot)
     cfg.scene.sensors = TeacherSceneSensorsCfg()
     contact_query = "hand_box_contact_forces"
-    if contact_reward == "grasp":
+    if contact_reward != "binary":
         contact_query = "hand_box_contact_points"
         for sensor, reward in (
             (cfg.scene.sensors.left_hand_box, cfg.rewards.left_hand_contact),
@@ -328,6 +339,8 @@ def make_sbto005_teacher_cfg() -> Sbto005TeacherCfg:
             sensor.data = [ContactReportField.found, ContactReportField.force, ContactReportField.pos]
             sensor.reduce = ContactSensorReduce.none
             reward.box_height = 2 * BOX_HALF_EXTENTS[2]
+            if contact_reward == "split":
+                reward.component = "force"
     cfg.scene.objs.floor.priority = 2
     cfg.actions.joint_position.safety_clip_fraction = 0.95
     cfg.queries.data.update(
