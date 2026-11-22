@@ -27,11 +27,16 @@ CONTACT_NAMES = ("obj_static_cnt", "left_hand_cnt", "right_hand_cnt")
 HAND_LINKS = ("left_wrist_pitch_link", "left_wrist_yaw_link", "right_wrist_pitch_link", "right_wrist_yaw_link")
 
 
-def reset_box(ctx: ManagerContext, env_ids: torch.Tensor, writes: Map[torch.Tensor]) -> None:
+def reset_box(ctx: ManagerContext, env_ids: torch.Tensor, writes: Map[torch.Tensor], initial_xy_noise: float) -> None:
     motion = ctx.commands["motion"]
     frames = motion.steps[env_ids, 0]
     extensions = motion.clip.extensions
-    writes["position"][:, 0] = extensions["object_pos_w"].data[frames]
+    position = writes["position"][:, 0]
+    position.copy_(extensions["object_pos_w"].data[frames])
+    if initial_xy_noise:
+        offset = (2 * ctx.rand.uniform((env_ids.numel(), 2), device=env_ids.device) - 1) * initial_xy_noise
+        # Later reference starts must retain the box pose paired with the robot.
+        position[:, :2] += offset * (frames == 0)[:, None]
     writes["rotation"][:, 0] = extensions["object_quat_w"].data[frames]
     writes["linear_velocity"][:, 0] = extensions["object_lin_vel_w"].data[frames]
     # The reference reset starts with zero angular velocity.
@@ -41,10 +46,12 @@ def reset_box(ctx: ManagerContext, env_ids: torch.Tensor, writes: Map[torch.Tens
 @configclass(kw_only=True)
 class BoxResetCfg(ResetTermCfg):
     body: str
+    initial_xy_noise: float = 0.0
 
     def __call__(self, ctx: BuildContext) -> ResetTerm:
         return ResetTerm(
             reset_box,
+            self.initial_xy_noise,
             writes={
                 "position": BodyPositionWrite((self.body,)),
                 "rotation": BodyRotationWrite((self.body,)),
@@ -145,17 +152,41 @@ class BoxRewardCfg(RewardTermCfg):
 def hand_contact_reward(ctx: ManagerContext, hand: int) -> torch.Tensor:
     motion = ctx.commands["motion"]
     reference = motion.clip.extensions[CONTACT_CHANNEL].data[motion.steps[:, 0], hand + 1] > 0
-    forces = ctx.sim["hand_contact_forces"][:, 2 * hand : 2 * hand + 2, :3]
-    peak_force = forces.square().sum(dim=-1).amax(dim=-1).sqrt()
-    magnitude_reward = torch.exp(-0.1 * (peak_force - 10.0).clamp_min(0))
-    return torch.where((peak_force > 1.0) == reference, magnitude_reward, 0.0)
+    force = ctx.sim["hand_box_contact_forces"].reshape(-1, 2, 3)[:, hand]
+    in_contact = torch.linalg.vector_norm(force, dim=-1) > 1.0
+    return (in_contact & reference).to(dtype=torch.float32)
+
+
+def hand_grasp_reward(ctx: ManagerContext, hand: int, box_height: float) -> torch.Tensor:
+    motion = ctx.commands["motion"]
+    reference = motion.clip.extensions[CONTACT_CHANNEL].data[motion.steps[:, 0], hand + 1] > 0
+    report = ctx.sim["hand_box_contact_points"].reshape(reference.shape[0], 2, -1)[:, hand]
+    # MotrixSim reports one contact count followed by fixed slots of [normal, tangent1, tangent2, x, y, z].
+    points = report[:, 1:].reshape(reference.shape[0], -1, 6)
+    valid = torch.arange(points.shape[1], device=points.device) < report[:, :1]
+    normal_force = torch.where(valid, points[..., 0].clamp_min(0.0), 0.0)
+    total_force = normal_force.sum(dim=-1)
+
+    offset_w = points[..., 3:6] - ctx.sim["object_pos"][:, None]
+    local_z = rotate_inverse(ctx.sim["object_quat"][:, None], offset_w)[..., 2]
+    height = local_z / box_height + 0.5
+    height_score = ((0.95 - height) / 0.15).clamp(0.0, 1.0)
+    height_score = torch.where(height >= 0.35 - 1e-6, height_score, 0.0)
+    hand_height_score = (height_score * normal_force).sum(dim=-1) / total_force.clamp_min(1e-6)
+
+    force_score = ((total_force - 2.0) / 13.0).clamp(0.0, 1.0)
+    force_score *= torch.exp(-0.1 * (total_force - 20.0).clamp_min(0.0))
+    return torch.where(reference, hand_height_score * force_score, 0.0)
 
 
 @configclass(kw_only=True)
 class HandContactRewardCfg(RewardTermCfg):
     hand: int
+    box_height: float | None = None
 
     def __call__(self, ctx: BuildContext) -> RewardTerm:
+        if self.box_height is not None:
+            return RewardTerm(hand_grasp_reward, self.hand, self.box_height)
         return RewardTerm(hand_contact_reward, self.hand)
 
 

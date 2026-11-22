@@ -4,6 +4,8 @@
 """Privileged FastSAC teacher for the physical SBTO 005 box."""
 
 import os
+from copy import deepcopy
+from math import isfinite
 from pathlib import Path
 
 import numpy as np
@@ -11,17 +13,25 @@ import torch
 
 from motrix_env_core import registry
 from motrix_env_core.config import configclass
-from motrix_env_core.config.scene import BodyCfg, UrdfFileCfg, UrdfGeomCfg
+from motrix_env_core.config.scene import (
+    BodyCfg,
+    ContactReportField,
+    ContactSensorCfg,
+    ContactSensorReduce,
+    SceneSensorsCfg,
+    UrdfFileCfg,
+    UrdfGeomCfg,
+)
 from motrix_env_core.manager.env import ManagerEnv
 from motrix_env_core.manager.terminations import ManagerTerminationsCfg
 from motrix_env_core.mdp.rewards import ActionRateRewardCfg
 from motrix_env_core.sim import (
-    BatchLinkNetContactForceQuery,
     BodyLinkNetContactForceQuery,
     LinkAngularVelocityQuery,
     LinkLinearVelocityQuery,
     LinkPositionQuery,
     LinkQuaternionQuery,
+    SensorValuesQuery,
 )
 from motrix_env_core.sim.model import (
     ActuatorKdQuery,
@@ -31,6 +41,7 @@ from motrix_env_core.sim.model import (
     LinkInertiaQuery,
 )
 from motrix_env_core.sim.write import GeomFrictionWrite, LinkComWrite, LinkInertiaWrite, LinkMassWrite
+from motrix_env_core.torch_manager.runtime import TorchTaskProgram
 from motrix_envs.config.scene.standard import StandardSceneObjsCfg
 from motrix_envs.locomotion.wbt.cfg import CommandsCfg, ObservationsCfg, ResetCfg, RewardsCfg
 from motrix_envs.locomotion.wbt.g1.common import G1WbtEnvCfg
@@ -66,6 +77,11 @@ from motrix_envs.locomotion.wbt.mdp.terminations import (
 
 TASK = "g1-29dof-wbt-largebox-sbto005-teacher"
 MOTION_ENV_VAR = "MOTRIX_SBTO005_MOTION"
+PLAY_PERTURBATIONS_ENV_VAR = "MOTRIX_SBTO005_PLAY_PERTURBATIONS"
+HAND_CONTACT_CURRICULUM_ENV_VAR = "MOTRIX_SBTO005_HAND_CONTACT_CURRICULUM"
+HAND_CONTACT_WEIGHT_ENV_VAR = "MOTRIX_SBTO005_HAND_CONTACT_WEIGHT"
+HAND_CONTACT_REWARD_ENV_VAR = "MOTRIX_SBTO005_HAND_CONTACT_REWARD"
+BOX_XY_DR_ENV_VAR = "MOTRIX_SBTO005_BOX_XY_DR"
 CLIP_FRAMES = 495
 CLIP_FPS = 50
 BOX_URDF = Path(__file__).resolve().parent.parent / "assets" / "objects" / "teacher005" / "box.urdf"
@@ -74,6 +90,7 @@ BOX_GEOM = "largebox_collision"
 BOX_HALF_EXTENTS = (0.1025, 0.0625, 0.14)
 BOX_MASS = 0.6
 BOX_FRICTION = (0.6, 0.0001, 0.0001)
+HAND_GEOMS = ("left_hand_collision", "right_hand_collision")
 END_EFFECTORS = ("left_ankle_roll_link", "right_ankle_roll_link", "left_wrist_yaw_link", "right_wrist_yaw_link")
 
 
@@ -103,8 +120,8 @@ class TeacherRewardsCfg(RewardsCfg):
     box_orientation: BoxRewardCfg = BoxRewardCfg(weight=1.0, sigma=0.5372, quantity="orientation")
     box_linear_velocity: BoxRewardCfg = BoxRewardCfg(weight=1.0, sigma=0.7071, quantity="linear_velocity")
     box_angular_velocity: BoxRewardCfg = BoxRewardCfg(weight=1.0, sigma=2.2361, quantity="angular_velocity")
-    left_hand_contact: HandContactRewardCfg = HandContactRewardCfg(weight=0.625, hand=0)
-    right_hand_contact: HandContactRewardCfg = HandContactRewardCfg(weight=0.625, hand=1)
+    left_hand_contact: HandContactRewardCfg = HandContactRewardCfg(weight=5.0, hand=0)
+    right_hand_contact: HandContactRewardCfg = HandContactRewardCfg(weight=5.0, hand=1)
     joint_acceleration: JointAccelerationSquaredCfg = JointAccelerationSquaredCfg(weight=-2.5e-7)
     joint_torque: JointTorqueSquaredCfg = JointTorqueSquaredCfg(weight=-1e-5)
 
@@ -153,12 +170,41 @@ class TeacherSceneObjsCfg(StandardSceneObjsCfg):
 
 
 @configclass
+class TeacherSceneSensorsCfg(SceneSensorsCfg):
+    left_hand_box: ContactSensorCfg = ContactSensorCfg(
+        geom1=HAND_GEOMS[0],
+        geom2=BOX_GEOM,
+        data=[ContactReportField.force],
+        reduce=ContactSensorReduce.netforce,
+    )
+    right_hand_box: ContactSensorCfg = ContactSensorCfg(
+        geom1=HAND_GEOMS[1],
+        geom2=BOX_GEOM,
+        data=[ContactReportField.force],
+        reduce=ContactSensorReduce.netforce,
+    )
+
+
+@configclass
 class TeacherRandomizationCfg:
     enabled: bool = True
     ground_sliding_friction: tuple[float, float] = (0.3, 1.2)
     torso_com_offset: float = 0.02
     box_mass_scale: tuple[float, float] = (0.8, 1.25)
     box_sliding_friction: tuple[float, float] = (0.4, 0.8)
+
+
+@configclass(frozen=True, kw_only=True)
+class HandContactCurriculumCfg:
+    start_iteration: int
+    end_iteration: int
+    final_weight: float
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.start_iteration < self.end_iteration:
+            raise ValueError("Expected 0 <= start_iteration < end_iteration.")
+        if not isfinite(self.final_weight) or self.final_weight < 0.0:
+            raise ValueError("Expected a finite, nonnegative final_weight.")
 
 
 @configclass(kw_only=True)
@@ -172,16 +218,25 @@ class Sbto005TeacherCfg(G1WbtEnvCfg):
     terminations: TeacherTerminationsCfg = TeacherTerminationsCfg()
     observations: TeacherObservationsCfg = TeacherObservationsCfg()
     randomization: TeacherRandomizationCfg = TeacherRandomizationCfg()
+    hand_contact_curriculum: HandContactCurriculumCfg | None = None
 
     def for_play(self) -> "Sbto005TeacherCfg":
+        perturbations = os.environ.get(PLAY_PERTURBATIONS_ENV_VAR, "0")
+        if perturbations not in ("0", "1"):
+            raise ValueError(f"{PLAY_PERTURBATIONS_ENV_VAR} must be 0 or 1.")
         cfg = super().for_play()
         cfg.commands.motion.sequential_clips = False
         cfg.commands.motion.hold_at_clip_end = True
+        cfg.hand_contact_curriculum = None
+        if perturbations == "1":
+            cfg.sim_reset = deepcopy(self.sim_reset)
+            return cfg
         policy = cfg.observations.policy
         for term in (policy.motion_ref_ori_b, policy.base_ang_vel, policy.dof_pos, policy.dof_vel):
             term.noise.amplitude = 0.0
         policy.box_pose.noise = 0.0
         policy.box_pose_error.noise = 0.0
+        cfg.sim_reset.object_state.initial_xy_noise = 0.0
         cfg.randomization.enabled = False
         return cfg
 
@@ -210,10 +265,69 @@ def _motion_path() -> Path:
     return path
 
 
+def _hand_contact_curriculum() -> HandContactCurriculumCfg | None:
+    value = os.environ.get(HAND_CONTACT_CURRICULUM_ENV_VAR)
+    if value is None:
+        return None
+    try:
+        start, end, weight = value.split(",")
+        return HandContactCurriculumCfg(start_iteration=int(start), end_iteration=int(end), final_weight=float(weight))
+    except ValueError as exc:
+        raise ValueError(
+            f"{HAND_CONTACT_CURRICULUM_ENV_VAR} must specify start_iteration,end_iteration,final_weight. {exc}"
+        ) from exc
+
+
+def _box_initial_xy_noise() -> float:
+    message = f"{BOX_XY_DR_ENV_VAR} must be a finite nonnegative half-range in meters."
+    try:
+        amplitude = float(os.environ.get(BOX_XY_DR_ENV_VAR, "0"))
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if not isfinite(amplitude) or amplitude < 0.0:
+        raise ValueError(message)
+    return amplitude
+
+
 @registry.envcfg(TASK)
 def make_sbto005_teacher_cfg() -> Sbto005TeacherCfg:
-    cfg = Sbto005TeacherCfg(motion_files=(str(_motion_path()),))
+    fixed_weight = os.environ.get(HAND_CONTACT_WEIGHT_ENV_VAR)
+    contact_reward = os.environ.get(HAND_CONTACT_REWARD_ENV_VAR, "binary")
+    if contact_reward not in ("binary", "grasp"):
+        raise ValueError(f"Expected {HAND_CONTACT_REWARD_ENV_VAR} to be 'binary' or 'grasp'.")
+    cfg = Sbto005TeacherCfg(
+        motion_files=(str(_motion_path()),),
+        hand_contact_curriculum=_hand_contact_curriculum() if fixed_weight is None else None,
+    )
+    if fixed_weight is not None:
+        message = f"{HAND_CONTACT_WEIGHT_ENV_VAR} must be a finite nonnegative weight."
+        try:
+            weight = float(fixed_weight)
+        except ValueError as exc:
+            raise ValueError(message) from exc
+        if not isfinite(weight) or weight < 0.0:
+            raise ValueError(message)
+        cfg.rewards.left_hand_contact.weight = weight
+        cfg.rewards.right_hand_contact.weight = weight
+    cfg.sim_reset.object_state.initial_xy_noise = _box_initial_xy_noise()
+    if cfg.sim_reset.object_state.initial_xy_noise:
+        # Mix full approaches into training while keeping reference initialization later in the clip.
+        cfg.commands.motion.start_at_timestep_zero_prob = 0.5
     cfg.scene.objs = TeacherSceneObjsCfg(robot=cfg.scene.objs.robot)
+    cfg.scene.sensors = TeacherSceneSensorsCfg()
+    contact_query = "hand_box_contact_forces"
+    if contact_reward == "grasp":
+        contact_query = "hand_box_contact_points"
+        for sensor, reward in (
+            (cfg.scene.sensors.left_hand_box, cfg.rewards.left_hand_contact),
+            (cfg.scene.sensors.right_hand_box, cfg.rewards.right_hand_contact),
+        ):
+            # MotrixSim reports the contact point on geom1. Score the box surface.
+            sensor.geom1, sensor.geom2 = sensor.geom2, sensor.geom1
+            sensor.num = 4
+            sensor.data = [ContactReportField.found, ContactReportField.force, ContactReportField.pos]
+            sensor.reduce = ContactSensorReduce.none
+            reward.box_height = 2 * BOX_HALF_EXTENTS[2]
     cfg.scene.objs.floor.priority = 2
     cfg.actions.joint_position.safety_clip_fraction = 0.95
     cfg.queries.data.update(
@@ -221,11 +335,11 @@ def make_sbto005_teacher_cfg() -> Sbto005TeacherCfg:
         object_quat=LinkQuaternionQuery(link=BOX_LINK),
         object_lin_vel=LinkLinearVelocityQuery(link=BOX_LINK),
         object_ang_vel=LinkAngularVelocityQuery(link=BOX_LINK),
-        hand_contact_forces=BatchLinkNetContactForceQuery(links=HAND_LINKS),
         undesired_contact_forces=BodyLinkNetContactForceQuery(
             body="pelvis", exclude_links=(*END_EFFECTORS[:2], *HAND_LINKS)
         ),
     )
+    cfg.queries.data[contact_query] = SensorValuesQuery(sensors=("left_hand_box", "right_hand_box"))
     cfg.queries.model.update(
         actuator_kd=ActuatorKdQuery(),
         floor_friction=GeomFrictionQuery(name="floor"),
@@ -248,6 +362,7 @@ class Sbto005TeacherEnv(ManagerEnv):
         self._episode_start_frame = torch.zeros(num_envs, dtype=torch.long)
         self._clip_truncated = torch.zeros(num_envs, dtype=torch.bool)
         self._time_truncated = torch.zeros(num_envs, dtype=torch.bool)
+        self._hand_contact_weights: tuple[torch.Tensor, ...] = ()
         self._previous_joint_velocity = self._reward_terms["joint_acceleration"].args[0]
         self._pd_effort_squared = self._reward_terms["joint_torque"].args[0]
         joint_names = self.model.bodies["robot"].joint_names
@@ -290,6 +405,23 @@ class Sbto005TeacherEnv(ManagerEnv):
         finally:
             self._initializing_episode_batch = False
 
+    def _build_task_program(self) -> TorchTaskProgram:
+        program = super()._build_task_program()
+        names = ("left_hand_contact", "right_hand_contact")
+        indices = {term.name: term.index for term in self.manager_layout.rewards}
+        self._hand_contact_weights = tuple(program.reward_weights[indices[name]] for name in names)
+        return program
+
+    def set_training_iteration(self, iteration: int) -> None:
+        curriculum = self.cfg.hand_contact_curriculum
+        if curriculum is None:
+            return
+        progress = (iteration - curriculum.start_iteration) / (curriculum.end_iteration - curriculum.start_iteration)
+        progress = min(max(progress, 0.0), 1.0)
+        initial_weights = (self.cfg.rewards.left_hand_contact.weight, self.cfg.rewards.right_hand_contact.weight)
+        for target, initial in zip(self._hand_contact_weights, initial_weights, strict=True):
+            target.fill_(initial + (curriculum.final_weight - initial) * progress)
+
     def _make_metrics_view(self):
         metrics = super()._make_metrics_view()
         metrics.update(
@@ -297,6 +429,8 @@ class Sbto005TeacherEnv(ManagerEnv):
             episode_clip_end=self._clip_truncated,
             episode_timeout=self._time_truncated,
         )
+        if self._hand_contact_weights:
+            metrics["hand_contact_weight"] = self._hand_contact_weights[0]
         return metrics
 
     def _reset_sim_rows(self, env_ids: torch.Tensor, episode_reset: torch.Tensor) -> None:
