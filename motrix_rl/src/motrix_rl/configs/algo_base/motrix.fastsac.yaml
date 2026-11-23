@@ -16,6 +16,8 @@ agent:
   critic_learning_rate: 0.0003
   # AdamW learning rate for the automatically tuned entropy temperature.
   alpha_learning_rate: 0.0003
+  # Apply the configured learning rates after restoring checkpoint optimizers.
+  override_resume_learning_rates: false
   # AdamW weight-decay coefficient for actor and critic parameters.
   weight_decay: 0.001
   # Maximum actor/critic gradient norm; values <= 0 disable gradient clipping.

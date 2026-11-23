@@ -14,6 +14,7 @@ class FastSacAgentCfg:
     actor_learning_rate: float = MISSING
     critic_learning_rate: float = MISSING
     alpha_learning_rate: float = MISSING
+    override_resume_learning_rates: bool = False
     weight_decay: float = MISSING
     max_grad_norm: float = MISSING
 
