@@ -8,11 +8,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from motrix_env_core.math.quaternion import rotate_inverse
 from motrix_envs.locomotion.wbt.g1.common import G1_TRACKED_BODY_NAMES
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.camera import DEPTH, student_depth
+from motrix_envs.locomotion.wbt.g1.sbto005_distill.depth_noise import DepthNoise
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.rollout import make_env, make_student, make_teacher, student_terms
+from motrix_envs.locomotion.wbt.g1.sbto005_distill.visibility import MIN_BOX_PIXELS
 
 
 def first_streak(condition: np.ndarray, length: int, after: int = 0) -> int | None:
@@ -60,10 +63,24 @@ def score(position, speed, reference, complete):
 
 
 @torch.no_grad()
-def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_yaw, blind):
-    env = make_env(count, seed, evaluation=True, box_xy=box_xy, box_yaw=box_yaw)
+def evaluate_batch(
+    count, seed, device, teacher_path, student_path, box_xy, box_yaw, blind, *, noise_strength=None, unfiltered=False
+):
+    visible_box = noise_strength is not None and not unfiltered
+    env = make_env(
+        count,
+        seed,
+        evaluation=True,
+        box_xy=box_xy,
+        box_yaw=box_yaw,
+        visible_box=visible_box,
+        unfiltered_box=unfiltered and bool(box_xy),
+    )
     sim = env.sim_data
     state = env.init_state()
+    noise = DepthNoise(count, device, seed + 89471) if noise_strength is not None else None
+    all_rows = torch.arange(count)
+    empty_rows = all_rows[:0]
     columns = student_terms(env)
     if student_path is None:
         teacher = make_teacher(teacher_path, env, device)
@@ -90,10 +107,18 @@ def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_
         if student_path is None:
             action = teacher.act(obs.to(device), deterministic=True)
         else:
-            depth = student_depth(sim[DEPTH])
+            if noise is not None:
+                depth = noise.frame(
+                    sim[DEPTH],
+                    all_rows if frame == 0 else empty_rows,
+                    env.box_pixel_mask if visible_box else None,
+                    noise_strength,
+                )
+            else:
+                depth = student_depth(sim[DEPTH])
             if blind:
                 depth.fill_(1)
-            action = model(obs.index_select(1, columns).to(device), depth.to(device))
+            action = model(obs.index_select(1, columns).to(device), depth.to(device, dtype=torch.float32))
         state = env.step(action.cpu())
         pos.append(sim["object_pos"].clone())
         speeds.append(sim["object_lin_vel"].norm(dim=-1))
@@ -112,6 +137,10 @@ def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_
             break
 
     positions, speed, error = (torch.stack(trace).numpy() for trace in (pos, speeds, body_sq))
+    if visible_box:
+        clean_pixels = env.box_pixel_mask.flatten(1).sum(dim=1).tolist()
+        delivered_pixels = noise.first_box_pixels.tolist()
+        first_draw = env.box_first_draw.tolist()
     rows = []
     for lane, length in enumerate(lengths.tolist()):
         row = score(positions[:length, lane], speed[:length, lane], reference, bool(completed[lane]))
@@ -123,28 +152,54 @@ def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_
             body_relative_rms_m=float(np.sqrt(error[:length, lane].mean())),
             failure_terms=[name for name, mask in failure_masks.items() if mask[lane]],
         )
+        if visible_box:
+            row.update(
+                first_draw_visible=first_draw[lane],
+                first_clean_pixels=clean_pixels[lane],
+                first_student_pixels=delivered_pixels[lane],
+            )
         rows.append(row)
     return rows
 
 
+def _summarize(rows: list[dict]) -> dict:
+    summary = {
+        "successes": sum(row["success"] for row in rows),
+        "stable_lifts": sum(row["lift_start"] is not None for row in rows),
+        "count": len(rows),
+        "outcomes": dict(Counter(row["outcome"] for row in rows)),
+        "median_body_relative_rms_m": float(np.median([row["body_relative_rms_m"] for row in rows])),
+        "median_box_final_error_m": float(np.median([row["final_position_error_m"] for row in rows])),
+        "trials": rows,
+    }
+    if "first_student_pixels" in rows[0]:
+        summary["first_draw_pass_rate"] = sum(row["first_draw_visible"] for row in rows) / len(rows)
+        summary["first_frame_pass_rate"] = sum(row["first_student_pixels"] >= MIN_BOX_PIXELS for row in rows) / len(
+            rows
+        )
+    return summary
+
+
 def evaluate_policies(
     teacher: Path,
-    bc: Path,
+    bc: Path | None,
     dagger: Path,
     trials: int,
     device: torch.device,
     *,
     batch_size: int = 32,
+    include_blind: bool = True,
 ) -> dict:
     report = {}
+    policies = [("teacher", None, False)]
+    if bc is not None:
+        policies.append(("bc", bc, False))
+    policies.append(("dagger", dagger, False))
+    if include_blind:
+        policies.append(("dagger_blind", dagger, True))
     for condition, xy, yaw in (("fixed_box", 0.0, 0.0), ("full_dr", 0.10, 30.0)):
         group = {}
-        for name, checkpoint, blind in (
-            ("teacher", None, False),
-            ("bc", bc, False),
-            ("dagger", dagger, False),
-            ("dagger_blind", dagger, True),
-        ):
+        for name, checkpoint, blind in policies:
             rows = []
             for start in range(0, trials, batch_size):
                 count = min(batch_size, trials - start)
@@ -153,14 +208,71 @@ def evaluate_policies(
                 assert [r["initial_box_pose"] for r in rows] == [
                     r["initial_box_pose"] for r in group["teacher"]["trials"]
                 ]
-            group[name] = {
-                "successes": sum(row["success"] for row in rows),
-                "count": trials,
-                "outcomes": dict(Counter(row["outcome"] for row in rows)),
-                "median_body_relative_rms_m": float(np.median([row["body_relative_rms_m"] for row in rows])),
-                "median_box_final_error_m": float(np.median([row["final_position_error_m"] for row in rows])),
-                "trials": rows,
-            }
+            group[name] = _summarize(rows)
             print(condition, name, {key: value for key, value in group[name].items() if key != "trials"}, flush=True)
         report[condition] = group
     return report
+
+
+def evaluate_camera_dr(teacher: Path, student: Path, trials: int, device: torch.device, policy_name: str) -> dict:
+    report = {}
+    for condition, strength in (("visible_box_clean", 0.0), ("visible_box_noisy", 1.0)):
+        rows = []
+        for start in range(0, trials, 32):
+            rows.extend(
+                evaluate_batch(
+                    min(32, trials - start),
+                    1001 + start,
+                    device,
+                    teacher,
+                    student,
+                    0.0,
+                    0.0,
+                    False,
+                    noise_strength=strength,
+                )
+            )
+        summary = _summarize(rows)
+        report[condition] = {policy_name: summary}
+        print(condition, policy_name, {k: v for k, v in summary.items() if k != "trials"}, flush=True)
+    return report
+
+
+def evaluate_unfiltered(checkpoint: Path, trials: int, device: torch.device) -> dict:
+    report = {}
+    for condition, xy, yaw in (("fixed_box", 0.0, 0.0), ("box_dr", 0.10, 30.0)):
+        rows = []
+        for start in range(0, trials, 32):
+            rows.extend(
+                evaluate_batch(
+                    min(32, trials - start),
+                    1001 + start,
+                    device,
+                    None,
+                    checkpoint,
+                    xy,
+                    yaw,
+                    False,
+                    noise_strength=1.0,
+                    unfiltered=True,
+                )
+            )
+        summary = _summarize(rows)
+        report[condition] = {"student": summary}
+        print(condition, {key: value for key, value in summary.items() if key != "trials"}, flush=True)
+    return report
+
+
+def log_evaluation_scalars(run_dir: Path, report: dict, step: int) -> None:
+    """Keep evaluation events separate from the active learner's event stream."""
+    with SummaryWriter(run_dir / "evaluation-tb") as writer:
+        for condition, policies in report.items():
+            for policy, stats in policies.items():
+                prefix = f"eval/{condition}/{policy}"
+                count = stats["count"]
+                writer.add_scalar(f"{prefix}/carry_success_rate", stats["successes"] / count, step)
+                writer.add_scalar(f"{prefix}/stable_lift_rate", stats["stable_lifts"] / count, step)
+                writer.add_scalar(f"{prefix}/episodes", count, step)
+                for metric in ("median_box_final_error_m", "first_draw_pass_rate", "first_frame_pass_rate"):
+                    if metric in stats:
+                        writer.add_scalar(f"{prefix}/{metric}", stats[metric], step)

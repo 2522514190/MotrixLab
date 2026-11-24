@@ -1,13 +1,14 @@
 # Copyright Motphys Technology Co., Ltd. 2025, 2026
 # SPDX-License-Identifier: Apache-2.0
 
-"""Train one Student from BC and DAgger, with one collector per learner."""
+"""Train one Student with DAgger, with optional BC initialization."""
 
 import hashlib
 import json
 import os
 import resource
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +21,7 @@ from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 
+from motrix_envs.locomotion.wbt.g1.sbto005_distill import depth_noise, visibility
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.policy import Student
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.rollout import (
     Rollout,
@@ -28,6 +30,11 @@ from motrix_envs.locomotion.wbt.g1.sbto005_distill.rollout import (
     make_env,
     make_teacher,
 )
+
+DIRECT_CHECKPOINT_INTERVAL = 200
+DIRECT_EVALUATION_ROUNDS = (1000, 3000)
+CAMERA_DR_EVALUATION_ROUNDS = (1000, 3000, 5000, 8000, 12000)
+REPLAY_ROUNDS = 8
 
 
 @dataclass(frozen=True)
@@ -47,15 +54,25 @@ class TrainingSpec:
     handover_rounds: int = 6
     updates: int = 16
     batch_size: int = 512
+    camera_dr: bool = False
+    baseline: Path | None = None
 
     def __post_init__(self):
         if self.learners not in (1, 2) or self.envs % self.learners or self.batch_size % (4 * self.learners):
             raise ValueError("Use one or two learners, evenly split environments and quarter minibatches.")
-        if not (2 <= self.handover_rounds <= self.dagger_rounds):
+        if self.bc_epochs == 0:
+            if self.learners != 1 or self.handover_rounds != 0:
+                raise ValueError("Direct DAgger uses one local learner and no Teacher handover.")
+        elif not (2 <= self.handover_rounds <= self.dagger_rounds):
             raise ValueError("DAgger handover must span at least two rounds within the run.")
+        if self.camera_dr and self.bc_epochs:
+            raise ValueError("Camera DR is supported by direct DAgger.")
         if self.bc_width is not None and not (0 < self.bc_width <= self.envs // self.learners):
             raise ValueError("BC sample width must fit one collector.")
-        if min(self.envs, self.bc_steps, self.bc_epochs, self.dagger_steps, self.updates, self.batch_size) <= 0:
+        if (
+            self.bc_epochs < 0
+            or min(self.envs, self.bc_steps, self.dagger_rounds, self.dagger_steps, self.updates, self.batch_size) <= 0
+        ):
             raise ValueError("Training sizes and budgets must be positive.")
 
 
@@ -87,7 +104,7 @@ def _device(spec, rank):
 def _rollout(spec, rank, device):
     configure_motion(spec.motion)
     seed = spec.seed + rank * 100003
-    env = make_env(spec.envs // spec.learners, seed)
+    env = make_env(spec.envs // spec.learners, seed, visible_box=spec.camera_dr)
     return Rollout(env, make_teacher(spec.teacher, env, device), device, seed + 1)
 
 
@@ -165,16 +182,24 @@ class Collector:
                 self.process.join()
 
 
-def _normalization(model, samples, device, distributed):
+def _observation_totals(samples, device):
     obs = samples.state.to(device, dtype=torch.float64)
-    stats = torch.cat([obs.sum(dim=0), obs.square().sum(dim=0), obs.new_tensor([len(obs)])])
-    if distributed:
-        dist.all_reduce(stats)
+    return torch.cat([obs.sum(dim=0), obs.square().sum(dim=0), obs.new_tensor([len(obs)])])
+
+
+def _set_normalization(model, stats):
     total, squares = stats[:-1].chunk(2)
     mean = total / stats[-1]
     var = (squares / stats[-1] - mean.square()).clamp_min(0.0)
     model.state_mean.copy_(mean)
     model.state_scale.copy_(var.sqrt().clamp_min(1e-3))
+
+
+def _normalization(model, samples, device, distributed):
+    stats = _observation_totals(samples, device)
+    if distributed:
+        dist.all_reduce(stats)
+    _set_normalization(model, stats)
 
 
 def _update(ddp, model, optimizer, batch, device):
@@ -192,7 +217,7 @@ def _join(a, b):
 
 
 def _pin(rank, learners):
-    if learners == 2 and hasattr(os, "sched_getaffinity"):
+    if learners > 1 and hasattr(os, "sched_getaffinity"):
         cpus = sorted(os.sched_getaffinity(0))
         if len(cpus) >= learners:
             start = len(cpus) * rank // learners
@@ -258,7 +283,7 @@ def _rank(rank, spec: TrainingSpec, rendezvous: str | None = None):
         if rank == 0:
             _save(spec.output, "bc.pt", model, optimizer, "bc", spec.bc_epochs)
 
-        replay = deque(maxlen=8)
+        replay = deque(maxlen=REPLAY_ROUNDS)
         for round_index in range(spec.dagger_rounds):
             started = perf_counter()
             beta = max(0.0, 1 - round_index / (spec.handover_rounds - 1))
@@ -307,7 +332,74 @@ def _rank(rank, spec: TrainingSpec, rendezvous: str | None = None):
             dist.destroy_process_group()
 
 
-def train(spec: TrainingSpec):
+def _train_direct(spec: TrainingSpec, evaluate: Callable[[Path, int], None] | None):
+    device = _device(spec, 0)
+    torch.set_num_threads(2)
+    rollout = _rollout(spec, 0, device)
+    model = rollout.student
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
+    obs_totals = torch.zeros(2 * model.state_mean.numel() + 1, dtype=torch.float64, device=device)
+    rng = torch.Generator().manual_seed(spec.seed + 197)
+    slots = [Samples.allocate(spec.dagger_steps, spec.envs) for _ in range(REPLAY_ROUNDS)]
+    replay = [slot.take(spec.dagger_steps, spec.envs) for slot in slots]
+    evaluation_rounds = CAMERA_DR_EVALUATION_ROUNDS if spec.camera_dr else DIRECT_EVALUATION_ROUNDS
+
+    with SummaryWriter(spec.output) as writer, (spec.output / "learner-0.jsonl").open("w", buffering=1) as events:
+        for index in range(spec.dagger_rounds):
+            step = index + 1
+            model.eval()
+            stats = rollout.collect_student(slots[index % REPLAY_ROUNDS])
+            started = perf_counter()
+            obs_totals += _observation_totals(replay[index % REPLAY_ROUNDS], device)
+            _set_normalization(model, obs_totals)
+            model.train()
+            losses = []
+            for _ in range(spec.updates):
+                slot = int(torch.randint(min(step, REPLAY_ROUNDS), (), generator=rng))
+                losses.append(_update(model, model, optimizer, replay[slot].sample(spec.batch_size, rng), device))
+            loss = float(torch.stack(losses).mean())
+            optimize_seconds = perf_counter() - started
+            scalars = dict(
+                loss=loss,
+                beta=0.0,
+                updates=spec.updates,
+                sample_seconds=stats["seconds"],
+                optimize_seconds=optimize_seconds,
+                env_steps_per_second=stats["steps"] / (stats["seconds"] + optimize_seconds),
+                total_env_steps=step * stats["steps"],
+                resets=stats["resets"],
+            )
+            if spec.camera_dr:
+                counts = stats["visibility"]
+                scalars.update(
+                    depth_noise_strength=stats["depth_noise_strength"],
+                    first_draw_pass_rate=counts["first_draw_passes"] / counts["resets"],
+                    first_frame_pass_rate=counts["first_frame_passes"] / counts["first_frames"],
+                    xy_retries=counts["xy_retries"],
+                    pose_retries=counts["pose_retries"],
+                    first_frame_mask_fallbacks=counts["first_frame_mask_fallbacks"],
+                )
+            row = dict(stage="dagger", step=step, **scalars, collector=stats, learner=_resource_usage(device))
+            events.write(json.dumps(row, allow_nan=False) + "\n")
+            for name, value in scalars.items():
+                writer.add_scalar(f"dagger/{name}", value, step)
+            if step <= 3 or step % 10 == 0 or step == spec.dagger_rounds:
+                print(f"dagger {step}/{spec.dagger_rounds}: {scalars}", flush=True)
+
+            name = "dagger.pt"
+            if step % 100 == 0 or step == spec.dagger_rounds:
+                _save(spec.output, name, model, optimizer, "dagger", step)
+                writer.flush()
+            if step % DIRECT_CHECKPOINT_INTERVAL == 0 or step in evaluation_rounds:
+                name = f"dagger-{step}.pt"
+                _save(spec.output, name, model, optimizer, "dagger", step)
+            if evaluate is not None and (step in evaluation_rounds or step == spec.dagger_rounds):
+                devices = [device.index] if device.type == "cuda" else []
+                with torch.random.fork_rng(devices=devices):
+                    evaluate(spec.output / name, step)
+
+
+def train(spec: TrainingSpec, *, evaluate: Callable[[Path, int], None] | None = None):
     if spec.device == "cuda" and torch.cuda.device_count() < spec.learners:
         raise RuntimeError(f"Expected {spec.learners} CUDA devices.")
     spec.output.mkdir(parents=True)
@@ -318,8 +410,32 @@ def train(spec: TrainingSpec):
         objective="smooth_l1_beta_0.1_normalized_action",
         collectors=spec.learners,
     )
+    if spec.camera_dr:
+        metadata.update(
+            visibility=dict(
+                xy_low_m=visibility.XY_LOW,
+                xy_high_m=visibility.XY_HIGH,
+                yaw_deg=visibility.YAW_DEG,
+                min_box_pixels=visibility.MIN_BOX_PIXELS,
+                xy_retries=visibility.XY_RETRIES,
+                pose_retries=visibility.POSE_RETRIES,
+            ),
+            depth_noise=dict(
+                gaussian_std_normalized=depth_noise.GAUSSIAN_STD,
+                salt_probability=depth_noise.SALT_PROB,
+                rectangle_count=depth_noise.RECT_COUNT,
+                rectangle_size=depth_noise.RECT_SIZE,
+                max_lag=depth_noise.MAX_LAG,
+                hold_probability=depth_noise.HOLD_PROB,
+                ramp_control_steps=depth_noise.RAMP_STEPS,
+            ),
+        )
+        if spec.baseline is not None:
+            metadata["baseline_sha256"] = sha256(spec.baseline)
     (spec.output / "metadata.json").write_text(json.dumps(metadata, default=str, indent=2) + "\n")
-    if spec.learners == 1:
+    if spec.bc_epochs == 0:
+        _train_direct(spec, evaluate)
+    elif spec.learners == 1:
         _rank(0, spec)
     else:
         with TemporaryDirectory(prefix="sbto-distill-ddp-") as directory:

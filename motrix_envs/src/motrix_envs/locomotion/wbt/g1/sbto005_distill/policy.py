@@ -3,9 +3,13 @@
 
 """Depth-conditioned deterministic SBTO005 policy."""
 
+from math import log
+
 import torch
 from torch import nn
 
+LOG_STD_MIN = -5.0
+LOG_STD_MAX = 0.0
 STATE_SIZE = 154
 ACTION_SIZE = 29
 STATE_TERMS = ("motion_joint", "motion_ref_ori_b", "base_ang_vel", "dof_pos", "dof_vel", "actions")
@@ -39,8 +43,45 @@ class Student(nn.Module):
             nn.Tanh(),
         )
 
-    def forward(self, state: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+    def features(self, state: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         state = ((state - self.state_mean) / self.state_scale).clamp(-10, 10)
         features = self.cnn(depth).flatten(start_dim=2).softmax(dim=-1)
         keypoints = (features @ self.coordinates).flatten(start_dim=1)
-        return self.mlp(torch.cat((state, keypoints), dim=-1)) * self.half_range + self.center
+        x = torch.cat((state, keypoints), dim=-1)
+        for layer in list(self.mlp)[:6]:
+            x = layer(x)
+        return x
+
+    def forward(self, state: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+        return self.mlp[7](self.mlp[6](self.features(state, depth))) * self.half_range + self.center
+
+
+def student_terms(env) -> torch.Tensor:
+    layout = env.manager_layout.observations["policy"]
+    slices = {term.name: term.output_slice for term in layout.terms}
+    columns = torch.cat([torch.arange(slices[name].start, slices[name].stop) for name in STATE_TERMS])
+    if columns.numel() != STATE_SIZE or env.observation_manager.spec.policy.space.shape != (172,):
+        raise ValueError("Unexpected SBTO005 Teacher/Student observation layout.")
+    return columns
+
+
+class GaussianStudent(nn.Module):
+    """A tanh-squashed Gaussian with a learned, observation-independent std."""
+
+    def __init__(self, student: Student):
+        super().__init__()
+        self.student = student
+        self.log_std = nn.Parameter(torch.full((ACTION_SIZE,), log(0.1)))
+
+    def forward(self, state: torch.Tensor, depth: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        mean = self.student.mlp[6](self.student.features(state, depth))
+        return mean, self.log_std
+
+    def label(self, action: torch.Tensor) -> torch.Tensor:
+        normalized = (action - self.student.center) / self.student.half_range
+        return normalized.clamp(-1 + 1e-6, 1 - 1e-6).atanh()
+
+    def sample(self, state: torch.Tensor, depth: torch.Tensor, rng: torch.Generator) -> torch.Tensor:
+        mean, log_std = self(state, depth)
+        noise = torch.randn(mean.shape, device=mean.device, generator=rng)
+        return (mean + log_std.exp() * noise).tanh() * self.student.half_range + self.student.center
