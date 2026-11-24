@@ -32,10 +32,8 @@ TASK = "g1-29dof-wbt-largebox-sbto005-student"
 @registry.envcfg(TASK)
 def make_sbto005_student_cfg() -> Sbto005TeacherCfg:
     cfg = make_sbto005_teacher_cfg()
-    fixed_box = os.environ.get("MOTRIX_SBTO005_STUDENT_FIXED_BOX") == "1"
-    if fixed_box:
-        cfg.commands.motion.start_at_timestep_zero_prob = 0.0
-    configure_visible_box(cfg, fixed_box=fixed_box)
+    if os.environ.get("MOTRIX_SBTO005_STUDENT_TEACHER_RESET") != "1":
+        configure_visible_box(cfg)
     return cfg
 
 
@@ -82,7 +80,7 @@ class Sbto005StudentEnv(VisibleBoxEnv):
     def compute_observation(self, state):
         super().compute_observation(state)
         fresh = torch.nonzero(state.episode_steps == 0).flatten()
-        protect = fresh[self._episode_start_frame[fresh] == 0]
+        protect = fresh[self._episode_start_frame[fresh] == 0] if self.box_pixel_mask is not None else fresh[:0]
         depth = self._depth_noise.frame(self.sim_data[DEPTH], fresh, self.box_pixel_mask, 1.0, protect=protect)
         return state.replace(obs=self._pack_student_obs(self.observation_manager.observation, depth))
 

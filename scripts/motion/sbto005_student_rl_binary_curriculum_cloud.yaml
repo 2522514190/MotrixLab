@@ -1,5 +1,5 @@
 name: yudong_box005_student_rl_binary_curriculum_100k
-description: SBTO005 fixed-box FastSAC fine-tuning with a binary hand-contact curriculum
+description: SBTO005 fixed-box FastSAC fine-tuning with Teacher resets and a binary hand-contact curriculum
 environment: volcano-yudong-box-teacher-dual
 tenant: locomotion
 results: s3
@@ -44,7 +44,7 @@ stages:
         MOTRIX_SBTO005_STUDENT_INIT: /data/jfs/yudong/box-carry/sbto005/v050/distill-assets/student-dagger-8200-2b4613c/dagger-8200.pt
         MOTRIX_SBTO005_HAND_CONTACT_REWARD: binary
         MOTRIX_SBTO005_HAND_CONTACT_CURRICULUM: "60000,90000,2"
-        MOTRIX_SBTO005_STUDENT_FIXED_BOX: "1"
+        MOTRIX_SBTO005_STUDENT_TEACHER_RESET: "1"
         MOTRIX_SBTO005_BOX_XY_DR: "0"
         MOTRIX_SBTO005_BOX_YAW_DR_DEG: "0"
         OMP_NUM_THREADS: "1"
