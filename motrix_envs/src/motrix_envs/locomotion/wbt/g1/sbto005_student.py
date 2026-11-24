@@ -1,8 +1,9 @@
-# Copyright Motphys Technology Co., Ltd. 2026
+# Copyright Motphys Technology Co., Ltd. 2025, 2026
 # SPDX-License-Identifier: Apache-2.0
 
 """SBTO005 with teacher training dynamics and distilled student observations."""
 
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,7 +15,11 @@ from motrix_env_core import registry
 from motrix_env_core.array.env import EnvObs, FinalObs
 from motrix_env_core.observations import ObservationGroupSpec, ObservationSpec
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.camera import (
-    DEPTH, HEIGHT, WIDTH, attach_depth_camera, isolate_head_for_rays,
+    DEPTH,
+    HEIGHT,
+    WIDTH,
+    attach_depth_camera,
+    isolate_head_for_rays,
 )
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.depth_noise import DepthNoise
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.policy import STATE_SIZE, student_terms
@@ -27,7 +32,10 @@ TASK = "g1-29dof-wbt-largebox-sbto005-student"
 @registry.envcfg(TASK)
 def make_sbto005_student_cfg() -> Sbto005TeacherCfg:
     cfg = make_sbto005_teacher_cfg()
-    configure_visible_box(cfg)
+    fixed_box = os.environ.get("MOTRIX_SBTO005_STUDENT_FIXED_BOX") == "1"
+    if fixed_box:
+        cfg.commands.motion.start_at_timestep_zero_prob = 0.0
+    configure_visible_box(cfg, fixed_box=fixed_box)
     return cfg
 
 

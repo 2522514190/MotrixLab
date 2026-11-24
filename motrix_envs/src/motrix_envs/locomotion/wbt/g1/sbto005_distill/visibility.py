@@ -1,4 +1,4 @@
-# Copyright Motphys Technology Co., Ltd. 2026
+# Copyright Motphys Technology Co., Ltd. 2025, 2026
 # SPDX-License-Identifier: Apache-2.0
 
 """Accept only reset placements visible in the student's depth camera."""
@@ -23,8 +23,12 @@ XY_RETRIES = 4
 POSE_RETRIES = 3
 
 
-def reset_visible_box(ctx: ManagerContext, env_ids: torch.Tensor, writes: Map[torch.Tensor], yaw: float) -> None:
+def reset_visible_box(
+    ctx: ManagerContext, env_ids: torch.Tensor, writes: Map[torch.Tensor], yaw: float, fixed_box: bool
+) -> None:
     reset_box(ctx, env_ids, writes, 0.0, yaw)
+    if fixed_box:
+        return
     x, y = ctx.rand.uniform((env_ids.numel(), 2)).unbind(dim=-1)
     frame_zero = ctx.commands["motion"].steps[env_ids, 0] == 0
     writes["position"][:, 0, 0].add_(frame_zero * (XY_LOW[0] + (XY_HIGH[0] - XY_LOW[0]) * x))
@@ -33,13 +37,17 @@ def reset_visible_box(ctx: ManagerContext, env_ids: torch.Tensor, writes: Map[to
 
 @configclass(kw_only=True)
 class VisibleBoxResetCfg(BoxResetCfg):
+    fixed_box: bool = False
+
     def __call__(self, ctx: BuildContext) -> ResetTerm:
-        return ResetTerm(reset_visible_box, self.initial_yaw_noise, writes=super().__call__(ctx).writes)
+        return ResetTerm(reset_visible_box, self.initial_yaw_noise, self.fixed_box, writes=super().__call__(ctx).writes)
 
 
-def configure_visible_box(cfg: Sbto005TeacherCfg) -> None:
+def configure_visible_box(cfg: Sbto005TeacherCfg, *, fixed_box: bool = False) -> None:
     cfg.sim_reset.object_state = VisibleBoxResetCfg(
-        body=cfg.sim_reset.object_state.body, initial_yaw_noise=YAW_DEG * (torch.pi / 180)
+        body=cfg.sim_reset.object_state.body,
+        initial_yaw_noise=0.0 if fixed_box else YAW_DEG * (torch.pi / 180),
+        fixed_box=fixed_box,
     )
     site = cfg.scene.objs.robot.resolve_name(SITE)
     cfg.queries.data.update(
@@ -58,6 +66,7 @@ class VisibleBoxEnv(Sbto005TeacherEnv):
         self._box_size = torch.tensor(BOX_HALF_EXTENTS)
         self._xy_low = torch.tensor(XY_LOW)
         self._xy_span = torch.tensor(XY_HIGH) - self._xy_low
+        self._xy_retries = 0 if self.cfg.sim_reset.object_state.fixed_box else XY_RETRIES
         self._position_rng = torch.Generator().manual_seed(self._build_seed + 71219)
         self.box_pixel_mask = torch.zeros((self.num_envs, 1, HEIGHT, WIDTH), dtype=torch.bool)
         self.box_first_draw = torch.zeros(self.num_envs, dtype=torch.bool)
@@ -122,7 +131,7 @@ class VisibleBoxEnv(Sbto005TeacherEnv):
                 rotations[pending] = initial_rotation[pending]
                 self._refresh_box_reset(pending)
                 pending = self._unseen(pending)
-            for _ in range(XY_RETRIES):
+            for _ in range(self._xy_retries):
                 if not pending.numel():
                     break
                 self.visibility_counts["xy_retries"] += len(pending)
