@@ -39,8 +39,23 @@ class Student(nn.Module):
             nn.Tanh(),
         )
 
-    def forward(self, state: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+    def features(self, state: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         state = ((state - self.state_mean) / self.state_scale).clamp(-10, 10)
         features = self.cnn(depth).flatten(start_dim=2).softmax(dim=-1)
         keypoints = (features @ self.coordinates).flatten(start_dim=1)
-        return self.mlp(torch.cat((state, keypoints), dim=-1)) * self.half_range + self.center
+        x = torch.cat((state, keypoints), dim=-1)
+        for layer in list(self.mlp)[:6]:
+            x = layer(x)
+        return x
+
+    def forward(self, state: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+        return self.mlp[7](self.mlp[6](self.features(state, depth))) * self.half_range + self.center
+
+
+def student_terms(env) -> torch.Tensor:
+    layout = env.manager_layout.observations["policy"]
+    slices = {term.name: term.output_slice for term in layout.terms}
+    columns = torch.cat([torch.arange(slices[name].start, slices[name].stop) for name in STATE_TERMS])
+    if columns.numel() != STATE_SIZE or env.observation_manager.spec.policy.space.shape != (172,):
+        raise ValueError("Unexpected SBTO005 Teacher/Student observation layout.")
+    return columns

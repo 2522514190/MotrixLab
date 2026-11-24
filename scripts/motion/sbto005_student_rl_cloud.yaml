@@ -1,0 +1,52 @@
+name: yudong_box005_student_rl_2048_dual
+description: Async FastSAC fine-tuning initialized from SBTO005 DAgger step 8200
+environment: volcano-yudong-box-teacher-dual
+tenant: locomotion
+results: s3
+git:
+  remote: https://github.com/2522514190/MotrixLab.git
+  token: ${GITHUB_TOKEN:-}
+  lfs: true
+  repo_dir: /opt/motrixlab-src
+s3:
+  endpoint_url: http://vla.minio.mp:9000
+  bucket: motrixlab
+  key_prefix: yudong/box-carry-sbto005/student/rl-2048-dual
+  region: ap-east-1
+stages:
+  train:
+    adapter: motrixlab
+    params:
+      branches: [codex/sbto005-student-rl-v050]
+      task: g1-29dof-wbt-largebox-sbto005-student/motrix.fastsac
+      train_backend: torch
+      sim_backend: motrixsim
+      num_envs: 2048
+      seed: 2
+      play: false
+      render: false
+      logging_backend: tensorboard
+      logging_interval: 100
+      checkpoint_interval: 1000
+      train_entry: [mxlab, train]
+      uv_sync_extras: [cuda]
+      workdir: /tmp/motrixlab-student-rl
+      runs_root: /data/jfs/yudong/box-carry/sbto005/v050/runs/student/rl-2048-dual
+      extra_env:
+        GIT_CONFIG_COUNT: "1"
+        GIT_CONFIG_KEY_0: url.https://github.com/2522514190/MotrixLab.git.insteadOf
+        GIT_CONFIG_VALUE_0: https://github.com/Motphys/MotrixLab.git
+        MOTRIX_SBTO005_MOTION: /data/jfs/yudong/box-carry/sbto005/v050/sub3_realbox_motrix_g1_sbto_hand_weight_6.npz
+        MOTRIX_SBTO005_STUDENT_INIT: /data/jfs/yudong/box-carry/sbto005/v050/distill-assets/student-dagger-8200-2b4613c/dagger-8200.pt
+        MOTRIX_SBTO005_HAND_CONTACT_REWARD: grasp
+        MOTRIX_SBTO005_HAND_CONTACT_WEIGHT: "5"
+        MOTRIX_SBTO005_BOX_XY_DR: "0.10"
+        OMP_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
+        PYTHONUNBUFFERED: "1"
+      pre_commands:
+        - 'printf "%s  %s\n" 548200e213773c0dd7e2e60f05a24d42aa2c4886b7bc4b15181728c7b87dd6a7 "$MOTRIX_SBTO005_MOTION" | sha256sum --check --strict'
+        - 'printf "%s  %s\n" 2b4613c63b73ebfb7890e9df99e5fdaf8fe24714fc22f3e174a535dfa0f52bc7 "$MOTRIX_SBTO005_STUDENT_INIT" | sha256sum --check --strict'
+        - nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+    gpu_count: 2
+    num_nodes: 1

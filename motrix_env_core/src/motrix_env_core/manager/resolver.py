@@ -677,7 +677,7 @@ class ManagerProgramResolver:
                 )
 
     def _validate_observation_spaces(self, groups: dict[str, ObservationGroupEntry]) -> None:
-        spec = self._env.observation_spec
+        spec = self._env.observation_manager.spec
         if spec.groups.keys() != groups.keys():
             raise ValueError("Environment observation groups must match the manager config's groups.")
         for name, group in groups.items():

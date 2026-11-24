@@ -25,7 +25,7 @@ class FastSacOnnxExporter(OnnxPolicyExporter):
             raise RuntimeError("FastSAC ONNX export requires the 'motrix-rl[onnx]' extra") from error
 
         from motrix_rl_builtin.fastsac.buffer import EmpiricalNormalization
-        from motrix_rl_builtin.fastsac.networks import Actor
+        from motrix_rl_builtin.fastsac.networks import build_actor
 
         algo_cfg = request.task_config.algo
         if not isinstance(algo_cfg, FastSacCfg):
@@ -35,30 +35,25 @@ class FastSacOnnxExporter(OnnxPolicyExporter):
         if not isinstance(checkpoint, Mapping):
             raise ValueError(f"FastSAC checkpoint must be a mapping: {request.checkpoint}")
         actor_state = _module_state(checkpoint, "actor", request.checkpoint)
-        observation_size, action_size = _actor_sizes(actor_state)
-
         actor_cfg = algo_cfg.agent
-        actor = Actor(
-            n_obs=observation_size,
-            n_act=action_size,
-            hidden_dim=actor_cfg.actor_hidden_dim,
-            log_std_max=actor_cfg.log_std_max,
-            log_std_min=actor_cfg.log_std_min,
-            use_tanh=actor_cfg.use_tanh,
-            use_layer_norm=actor_cfg.use_layer_norm,
-            device="cpu",
-        )
+        if actor_cfg.actor_type == "sbto005_depth":
+            from motrix_rl_builtin.fastsac.sbto005_actor import OBS_SIZE
+
+            observation_size, action_size = OBS_SIZE, actor_state["student.center"].numel()
+        else:
+            observation_size, action_size = _actor_sizes(actor_state)
+        actor = build_actor(actor_cfg, observation_size, action_size, None, None, "cpu")
         actor.load_state_dict(actor_state, strict=True)
         actor.eval()
 
-        if actor_cfg.obs_normalization:
+        if actor_cfg.running_actor_normalization:
             normalizer = EmpiricalNormalization(shape=observation_size, device="cpu")
             normalizer.load_state_dict(_module_state(checkpoint, "obs_normalizer", request.checkpoint), strict=True)
             normalizer.eval()
         else:
             normalizer_state = _module_state(checkpoint, "obs_normalizer", request.checkpoint)
             if normalizer_state:
-                raise ValueError("FastSAC checkpoint has observation normalizer state while obs_normalization=false")
+                raise ValueError("FastSAC checkpoint has observation normalizer state with actor running normalization disabled")
             normalizer = nn.Identity()
 
         class DeterministicPolicy(nn.Module):

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from motrix_rl_builtin.fastsac.config import FastSacAgentCfg
 from motrix_rl_builtin.fastsac.async_impl.collector import Collector
 from motrix_rl_builtin.fastsac.async_impl.transport import (
     Control,
@@ -79,7 +80,7 @@ class _PerfEnv(_CpuEnv):
 
 def _cfg(device: str, *, compile: bool = False, amp: bool = False):
     return SimpleNamespace(
-        agent=SimpleNamespace(
+        agent=FastSacAgentCfg(
             actor_hidden_dim=32,
             log_std_max=0.0,
             log_std_min=-5.0,
@@ -415,7 +416,7 @@ class _BackpressureEnv:
 
 def _backpressure_collector(*, capacity=16):
     cfg = SimpleNamespace(
-        agent=SimpleNamespace(
+        agent=FastSacAgentCfg(
             actor_hidden_dim=16,
             log_std_max=2.0,
             log_std_min=-5.0,

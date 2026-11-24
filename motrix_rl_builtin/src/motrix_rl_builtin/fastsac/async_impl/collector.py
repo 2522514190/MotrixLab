@@ -30,7 +30,7 @@ from motrix_rl_builtin.fastsac.async_impl.transport import (
 )
 from motrix_rl_builtin.fastsac.buffer import EmpiricalNormalization
 from motrix_rl_builtin.fastsac.config import FastSacAgentCfg, FastSacCfg
-from motrix_rl_builtin.fastsac.networks import Actor
+from motrix_rl_builtin.fastsac.networks import Actor, build_actor
 from motrix_rl_builtin.fastsac.wrap import FastSacEnvWrap
 
 
@@ -71,6 +71,7 @@ class Collector:
         collector_id: int = 0,
     ):
         self.env = env
+        self._set_training_iteration = getattr(env, "set_training_iteration", None)
         self.cfg = cfg
         self.async_options = cfg.trainer.async_options
         acfg: FastSacAgentCfg = cfg.agent
@@ -93,20 +94,12 @@ class Collector:
             self._env_perf.enable()
         self._learning_starts = acfg.learning_starts
 
-        self.actor = Actor(
-            n_obs=obs_dim,
-            n_act=act_dim,
-            hidden_dim=acfg.actor_hidden_dim,
-            log_std_max=acfg.log_std_max,
-            log_std_min=acfg.log_std_min,
-            use_tanh=acfg.use_tanh,
-            use_layer_norm=acfg.use_layer_norm,
-            action_scale=action_scale,
-            action_bias=action_bias,
-            device=self.device,
-        )
+        self.actor = build_actor(acfg, obs_dim, act_dim, action_scale, action_bias, self.device)
         self.actor.eval()
-        if acfg.obs_normalization:
+        set_depth_device = getattr(env.env, "set_depth_device", None)
+        if set_depth_device is not None:
+            set_depth_device(self.device)
+        if acfg.running_actor_normalization:
             self.obs_normalizer = EmpiricalNormalization(shape=obs_dim, device=self.device)
         else:
             self.obs_normalizer = torch.nn.Identity()
@@ -201,7 +194,7 @@ class Collector:
 
     @torch.no_grad()
     def _sample_actions(self, warming: bool) -> torch.Tensor:
-        if warming and not self.is_resume:
+        if warming and not self.is_resume and self.cfg.agent.actor_type == "mlp":
             actions = torch.empty(self.num_envs, self.act_dim, device=self.env_device).uniform_(-1.0, 1.0)
             return actions * self._action_scale_cpu + self._action_bias_cpu
         return self._infer(self.obs)
@@ -244,6 +237,8 @@ class Collector:
         t_sample = time.perf_counter()
         actions = self._sample_actions(warming)
         t_env = time.perf_counter()
+        if self._set_training_iteration is not None:
+            self._set_training_iteration(steps)
         result = self.env.step(actions)
         t_payload = time.perf_counter()
         final_payload = None

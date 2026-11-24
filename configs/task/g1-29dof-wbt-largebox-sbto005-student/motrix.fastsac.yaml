@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - /algo_base@algo: motrix.fastsac
+  - _self_
+task:
+  env: g1-29dof-wbt-largebox-sbto005-student
+  rllib: motrix
+  algo: fastsac
+  train_backend: torch
+num_envs: 2048
+play_num_envs: 16
+seed: 2
+logging:
+  backend: tensorboard
+  interval: 100
+checkpoint:
+  interval: 1000
+algo:
+  agent:
+    actor_type: sbto005_depth
+    actor_init: ${oc.env:MOTRIX_SBTO005_STUDENT_INIT,''}
+  trainer:
+    async_options:
+      num_collectors: 2
+      num_learners: 2
+      learner_devices: [cuda:0, cuda:1]

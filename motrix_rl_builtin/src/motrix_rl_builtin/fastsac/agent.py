@@ -22,7 +22,7 @@ from torch import nn, optim
 
 from motrix_rl_builtin.fastsac.buffer import EmpiricalNormalization, SimpleReplayBuffer
 from motrix_rl_builtin.fastsac.config import FastSacAgentCfg
-from motrix_rl_builtin.fastsac.networks import Actor, Critic
+from motrix_rl_builtin.fastsac.networks import Critic, build_actor
 from motrix_rl_builtin.fastsac.window_metrics import WindowMetrics
 
 
@@ -76,18 +76,7 @@ class FastSacAgent:
         # drains them at a logging boundary.
         self.window_metrics = WindowMetrics()
 
-        self.actor = Actor(
-            n_obs=obs_dim,
-            n_act=act_dim,
-            hidden_dim=cfg.actor_hidden_dim,
-            log_std_max=cfg.log_std_max,
-            log_std_min=cfg.log_std_min,
-            use_tanh=cfg.use_tanh,
-            use_layer_norm=cfg.use_layer_norm,
-            action_scale=action_scale,
-            action_bias=action_bias,
-            device=device,
-        )
+        self.actor = build_actor(cfg, obs_dim, act_dim, action_scale, action_bias, device)
         critic_kwargs = dict(
             n_obs=critic_obs_dim,
             n_act=act_dim,
@@ -124,7 +113,9 @@ class FastSacAgent:
         self.alpha_optimizer = optim.AdamW([self.log_alpha], lr=cfg.alpha_learning_rate, betas=(0.9, 0.95), fused=fused)
 
         if cfg.obs_normalization:
-            self.obs_normalizer: nn.Module = EmpiricalNormalization(shape=obs_dim, device=device)
+            self.obs_normalizer: nn.Module = (
+                EmpiricalNormalization(shape=obs_dim, device=device) if cfg.running_actor_normalization else nn.Identity()
+            )
             self.critic_obs_normalizer: nn.Module = EmpiricalNormalization(shape=critic_obs_dim, device=device)
         else:
             self.obs_normalizer = nn.Identity()
@@ -473,7 +464,9 @@ class FastSacAgent:
         Loads networks, ``log_alpha`` and both normalizers unconditionally. With
         ``load_optimizers=False`` (or when the checkpoint predates optimizer
         serialization) the optimizer states are skipped — the mode for
-        inference-only / play loads that don't resume training.
+        inference-only / play loads that don't resume training. Setting
+        ``override_resume_learning_rates`` applies the configured rates after
+        restoring each optimizer's state.
         """
         self.actor.load_state_dict(ckpt["actor"])
         self.qnet.load_state_dict(ckpt["qnet"])
@@ -483,11 +476,16 @@ class FastSacAgent:
         self.critic_obs_normalizer.load_state_dict(ckpt["critic_obs_normalizer"])
         # optimizer states are optional (older checkpoints / inference-only loads)
         if load_optimizers:
-            if "q_optimizer" in ckpt:
-                self.q_optimizer.load_state_dict(ckpt["q_optimizer"])
-            if "actor_optimizer" in ckpt:
-                self.actor_optimizer.load_state_dict(ckpt["actor_optimizer"])
-            if "alpha_optimizer" in ckpt:
-                self.alpha_optimizer.load_state_dict(ckpt["alpha_optimizer"])
+            optimizers = (
+                ("q_optimizer", self.q_optimizer, self.cfg.critic_learning_rate),
+                ("actor_optimizer", self.actor_optimizer, self.cfg.actor_learning_rate),
+                ("alpha_optimizer", self.alpha_optimizer, self.cfg.alpha_learning_rate),
+            )
+            for name, optimizer, learning_rate in optimizers:
+                if name in ckpt:
+                    optimizer.load_state_dict(ckpt[name])
+                    if self.cfg.override_resume_learning_rates:
+                        for group in optimizer.param_groups:
+                            group["lr"] = learning_rate
         self.global_step = ckpt.get("global_step", 0)
         self.update_idx = ckpt.get("update_idx", self.update_idx)

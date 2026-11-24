@@ -8,5 +8,6 @@ imports exist for that registration side effect.
 """
 
 from . import backflip, dance, largebox, sbto005_teacher  # noqa: F401
+from . import sbto005_student  # noqa: F401  registers the student task
 
 __all__ = ["backflip", "dance", "largebox", "sbto005_teacher"]

@@ -104,6 +104,10 @@ class Trainer(TrainerBase):
         try:
             env = self._make_env(self._context.num_envs, render=self._render)
             agent = self._make_agent(env)
+            if not self._resume_from:
+                from motrix_rl_builtin.fastsac.networks import initialize_actor
+
+                initialize_actor(agent.actor, agent.cfg)
             num_iterations = self._rlcfg.trainer.num_learning_iterations
 
             if self._resume_from:
@@ -201,6 +205,7 @@ class Trainer(TrainerBase):
         agent.set_train_mode()
 
         obs, critic_obs = env.reset()
+        set_training_iteration = getattr(env, "set_training_iteration", None)
         ep_return = torch.zeros(agent.num_envs, device=device)
         ep_len = torch.zeros(agent.num_envs, device=device)
         episode_window = EpisodeWindow(max_episodes=100)
@@ -235,12 +240,14 @@ class Trainer(TrainerBase):
                 warming = local < cfg.learning_starts
                 if cfg.learning_starts > 0 and local == cfg.learning_starts:
                     training_log.event("warmup_done", step=agent.global_step)
-                if warming and not is_resume:
+                if warming and not is_resume and cfg.actor_type == "mlp":
                     actions = torch.empty(agent.num_envs, agent.act_dim, device=device).uniform_(-1.0, 1.0)
                     actions = actions * agent.actor.action_scale + agent.actor.action_bias
                 else:
                     actions = agent.act(obs, deterministic=False)
 
+                if set_training_iteration is not None:
+                    set_training_iteration(agent.global_step)
                 result = env.step(actions)
                 next_obs, next_critic_obs = result.obs, result.critic_obs
                 rewards, terminated, truncated = result.reward, result.terminated, result.truncated

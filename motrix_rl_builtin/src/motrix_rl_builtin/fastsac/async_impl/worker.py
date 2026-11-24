@@ -96,22 +96,11 @@ def actor_param_numel(cfg: FastSacCfg, dims, action_scale, action_bias) -> int:
     Builds a throwaway CPU actor mirroring the learner's — device-independent, so
     the parent can size shared memory without touching CUDA.
     """
-    from motrix_rl_builtin.fastsac.networks import Actor
+    from motrix_rl_builtin.fastsac.networks import build_actor
 
     obs_dim, _critic_obs_dim, act_dim = dims
     a = cfg.agent
-    actor = Actor(
-        n_obs=obs_dim,
-        n_act=act_dim,
-        hidden_dim=a.actor_hidden_dim,
-        log_std_max=a.log_std_max,
-        log_std_min=a.log_std_min,
-        use_tanh=a.use_tanh,
-        use_layer_norm=a.use_layer_norm,
-        action_scale=action_scale,
-        action_bias=action_bias,
-        device="cpu",
-    )
+    actor = build_actor(a, obs_dim, act_dim, action_scale, action_bias, "cpu")
     return sum(p.numel() for p in actor.parameters())
 
 
@@ -364,6 +353,8 @@ def run_collector_process(
         # from the learner that drains this collector's ring (its owner —
         # always rank 0 in the single-learner topology).
         weight_slots = handshake.await_weight_slots(collector_id)
+        if cfg.agent.actor_type != "mlp":
+            weight_slots, actor_buffers = weight_slots
         ring_slots = handshake.await_ring_slots(collector_id)
         weight_rx = weight_receiver_for(weights, weight_slots)
         if isinstance(ring, RingCursors):
@@ -395,6 +386,9 @@ def run_collector_process(
             is_resume=is_resume,
             collector_id=collector_id,
         )
+        if cfg.agent.actor_type != "mlp":
+            for name, buffer in collector.actor.named_buffers():
+                buffer.copy_(actor_buffers[name])
         collector.reset()
         collector.sync_weights()
         warmup_started = time.perf_counter()
@@ -552,6 +546,10 @@ def run_learner_process(
         if resume_from:
             ckpt = torch.load(resume_from, map_location=device, weights_only=False)
             agent.load_state_dict(ckpt, load_optimizers=True)
+        else:
+            from motrix_rl_builtin.fastsac.networks import initialize_actor
+
+            initialize_actor(agent.actor, cfg.agent)
         logger.info(
             "learner startup: agent build%s finished in %.3fs",
             " + checkpoint load" if resume_from else "",
@@ -580,7 +578,11 @@ def run_learner_process(
             # shared-memory slots otherwise; this rank is the exporter (its
             # CUDA context must keep the slot tensors alive).
             tx = GpuIpcWeightSender(shared, device) if weight_ipc[j] else HostWeightSender(shared)
-            handshake.ship_weight_slots(channel, tx.params)
+            tx.publish({"actor": agent.actor}, {"obs": agent.obs_normalizer})
+            slots = tx.params
+            if cfg.agent.actor_type != "mlp":
+                slots = (slots, {name: buffer.cpu() for name, buffer in agent.actor.named_buffers()})
+            handshake.ship_weight_slots(channel, slots)
             weight_txs.append(tx)
         # Wrap RingCursors into GpuIpcTransitionRing (allocating the device slots
         # and shipping them to the collector) BEFORE building the endpoints —
@@ -620,7 +622,6 @@ def run_learner_process(
             ddp_rank=rank if num_learners > 1 else None,
         )
         learner._last_train_gstep = resume_step  # lockstep basis continues from the checkpoint
-        learner.publish_weights()  # give every collector an initial policy before it warms up
 
         # Elapsed/ETA anchor. The collector's env build (scene compile, kernel
         # compile) runs concurrently with the learner build and can outlast it by

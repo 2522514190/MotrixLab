@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import torch
 import torch.multiprocessing as mp
+from motrix_rl_builtin.fastsac.config import FastSacAgentCfg
 from motrix_rl_builtin.fastsac.async_impl.transport import (
     Control,
     HostTransitionRing,
@@ -167,7 +168,7 @@ class _AsyncTestEnv(_AsyncEnv, DirectEnv):
 
 def _async_cfg():
     return SimpleNamespace(
-        agent=SimpleNamespace(
+        agent=FastSacAgentCfg(
             actor_hidden_dim=16,
             log_std_max=2.0,
             log_std_min=-5.0,
