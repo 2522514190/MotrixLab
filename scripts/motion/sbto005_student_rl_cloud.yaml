@@ -20,7 +20,6 @@ stages:
       branches: [codex/sbto005-student-rl-v050]
       task: g1-29dof-wbt-largebox-sbto005-student/motrix.fastsac
       train_backend: torch
-      sim_backend: motrixsim
       num_envs: 2048
       seed: 2
       play: false
