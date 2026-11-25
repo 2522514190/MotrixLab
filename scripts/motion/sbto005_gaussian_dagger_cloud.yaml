@@ -1,0 +1,53 @@
+name: yudong_box005_gaussian_dagger_conditional_logstd
+description: SBTO005 depth Student with conditional fc_logstd DAgger (tanh Gaussian NLL) from frozen 410k Teacher
+environment: volcano-yudong-box-teacher-dual
+tenant: locomotion
+results: s3
+git:
+  remote: https://github.com/2522514190/MotrixLab.git
+  token: ${GITHUB_TOKEN:-}
+  lfs: true
+  repo_dir: /opt/motrixlab-src
+s3:
+  endpoint_url: http://vla.minio.mp:9000
+  bucket: motrixlab
+  key_prefix: yudong/box-carry-sbto005/distill/gaussian-conditional-4096/v050
+  region: ap-east-1
+stages:
+  train:
+    adapter: motrixlab
+    params:
+      branches:
+        - codex/sbto005-teacher-v050
+      task: g1-29dof-wbt-largebox-sbto005-teacher/motrix.fastsac
+      train_backend: torch
+      num_envs: 4096
+      seed: 2
+      cpu: "176"
+      memory: 64Gi
+      play: false
+      render: false
+      train_entry: [python, scripts/motion/distill_sbto005_gaussian.py, cloud]
+      uv_sync_extras: [cuda]
+      workdir: /tmp/motrixlab-distill
+      runs_root: /data/jfs/yudong/box-carry/sbto005/v050/runs/distill/gaussian-conditional-4096
+      extra_env:
+        GIT_CONFIG_COUNT: "1"
+        GIT_CONFIG_KEY_0: url.https://github.com/2522514190/MotrixLab.git.insteadOf
+        GIT_CONFIG_VALUE_0: https://github.com/Motphys/MotrixLab.git
+        MOTRIX_SBTO005_MOTION: /data/jfs/yudong/box-carry/sbto005/v050/sub3_realbox_motrix_g1_sbto_hand_weight_6.npz
+        MOTRIX_DISTILL_MOTION_SHA256: 548200e213773c0dd7e2e60f05a24d42aa2c4886b7bc4b15181728c7b87dd6a7
+        MOTRIX_DISTILL_TEACHER: /data/jfs/yudong/box-carry/sbto005/v050/distill-assets/teacher-410k-2e914c2/checkpoints/latest.pt
+        MOTRIX_DISTILL_TEACHER_SHA256: 2e914c2730545439d17bbdaa573fb9a08c5dca00c473b813d11ae1cd767bb93f
+        MOTRIX_DISTILL_ROUNDS: "100"
+        MOTRIX_DISTILL_LEARNERS: "2"
+        OMP_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
+        PYTHONUNBUFFERED: "1"
+      pre_commands:
+        - test -f "$MOTRIX_SBTO005_MOTION"
+        - test -f "$MOTRIX_DISTILL_TEACHER"
+        - test -f "$(dirname "$(dirname "$MOTRIX_DISTILL_TEACHER")")/task_config.yaml"
+        - nvidia-smi topo -m
+    gpu_count: 2
+    num_nodes: 1
