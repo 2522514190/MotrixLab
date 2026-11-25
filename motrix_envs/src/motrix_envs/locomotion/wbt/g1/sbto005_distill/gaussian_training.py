@@ -18,11 +18,10 @@ import torch.multiprocessing as mp
 from motrix_rl_builtin.fastsac.networks import build_actor, initialize_actor
 from motrix_rl_builtin.fastsac.sbto005_actor import OBS_SIZE
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.tensorboard import SummaryWriter
 
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.camera import DEPTH, HEIGHT, WIDTH
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.depth_noise import RAMP_STEPS, DepthNoise
-from motrix_envs.locomotion.wbt.g1.sbto005_distill.evaluation import evaluate_unfiltered, log_evaluation_scalars
+from motrix_envs.locomotion.wbt.g1.sbto005_distill.evaluation import evaluate_unfiltered, evaluation_scalars
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.policy import (
     ACTION_SIZE,
     LOG_STD_MAX,
@@ -39,7 +38,9 @@ from motrix_envs.locomotion.wbt.g1.sbto005_distill.rollout import (
     make_teacher,
 )
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.training import _observation_totals, _pin, _set_normalization, sha256
-from motrix_envs.locomotion.wbt.g1.sbto005_teacher import Sbto005TeacherEnv
+from motrix_envs.locomotion.wbt.g1.sbto005_teacher import TASK, Sbto005TeacherEnv
+from motrix_rl.metrics import EXIT_TIMEOUT, MetricsLogger
+from motrix_rl.training_logger import TrainingLogger
 
 ROLLOUT_STEPS = 24
 EVALUATION_ROUNDS = (2000, 5000, 10000)
@@ -229,12 +230,28 @@ def _train_rank(rank, spec, rendezvous):
     width = spec.envs // spec.learners
     buffer = Samples.allocate(ROLLOUT_STEPS, width, shared=distributed)
     pipe = worker = None
-    if device.type == "cuda":
-        torch.cuda.set_device(device)
-        print(
-            f"learner {rank}: {torch.cuda.get_device_name(device)}, free/total memory {torch.cuda.mem_get_info(device)}"
-        )
+    metrics = MetricsLogger.from_env(spec.output) if rank == 0 else None
+    steps_per_round = spec.envs * ROLLOUT_STEPS
+    training_log = TrainingLogger(spec.output, metrics) if metrics is not None else None
+    evaluation_log = TrainingLogger(spec.output / "evaluation-tb", metrics) if metrics is not None else None
     try:
+        if device.type == "cuda":
+            torch.cuda.set_device(device)
+            name = torch.cuda.get_device_name(device)
+            print(f"learner {rank}: {name}, free/total memory {torch.cuda.mem_get_info(device)}")
+        if metrics is not None:
+            metrics.run(
+                "running",
+                env_name=TASK,
+                algo="gaussian_dagger",
+                train_backend="torch",
+                seed=spec.seed,
+                job_type="train",
+                primary_axis="env_steps",
+                total_steps=spec.rounds * steps_per_round,
+                num_envs=spec.envs,
+                run_dir=str(spec.output),
+            )
         if distributed:
             # Shared CPU weights bridge a learner and its collector. The rollout mailbox stores fp16 depth.
             weights = GaussianStudent(Student(-torch.ones(ACTION_SIZE), torch.ones(ACTION_SIZE))).share_memory()
@@ -260,66 +277,85 @@ def _train_rank(rank, spec, rendezvous):
         totals = torch.zeros(2 * STATE_SIZE + 1, dtype=torch.float64, device=device)
         counts = torch.zeros(3, dtype=torch.long)
         started = perf_counter()
-        with SummaryWriter(spec.output) if rank == 0 else nullcontext() as writer:
-            for step in range(1, spec.rounds + 1):
+        if metrics is not None:
+            metrics.event("run_started", learners=spec.learners)
+        for step in range(1, spec.rounds + 1):
+            if distributed:
+                weights.load_state_dict(model.state_dict())
+                pipe.send(True)
+                outcomes, seconds = pipe.recv()
+            else:
+                outcomes, seconds = rollout.collect(buffer)
+            samples = buffer.take(ROLLOUT_STEPS, width)
+            stats = _observation_totals(samples, device)
+            if distributed:
+                dist.all_reduce(stats)
+            totals += stats
+            _set_normalization(model.student, totals)
+            loss, mean_std = _update(ddp, model, optimizer, samples, device)
+            counts += torch.tensor(outcomes)
+            if step == 1 or step % 10 == 0 or step == spec.rounds:
+                gathered = torch.tensor(
+                    [float(loss), float(mean_std), seconds, *counts.tolist()], dtype=torch.float64, device=device
+                )
                 if distributed:
-                    weights.load_state_dict(model.state_dict())
-                    pipe.send(True)
-                    outcomes, seconds = pipe.recv()
-                else:
-                    outcomes, seconds = rollout.collect(buffer)
-                samples = buffer.take(ROLLOUT_STEPS, width)
-                stats = _observation_totals(samples, device)
-                if distributed:
-                    dist.all_reduce(stats)
-                totals += stats
-                _set_normalization(model.student, totals)
-                loss, mean_std = _update(ddp, model, optimizer, samples, device)
-                counts += torch.tensor(outcomes)
-                if step == 1 or step % 10 == 0 or step == spec.rounds:
-                    metrics = torch.tensor(
-                        [float(loss), float(mean_std), seconds, *counts.tolist()], dtype=torch.float64, device=device
+                    dist.all_reduce(gathered)
+                loss_sum, mean_std_sum, collect_seconds, episodes, lifts, successes = gathered.tolist()
+                if training_log is not None:
+                    mean_std = mean_std_sum / spec.learners
+                    scalars = {
+                        "dagger/nll": loss_sum / spec.learners,
+                        "dagger/mean_action_std": mean_std,
+                        "dagger/env_steps_per_second": steps_per_round * spec.learners / collect_seconds,
+                        "dagger/episodes": episodes,
+                    }
+                    if episodes:
+                        scalars["dagger/carry_success_rate"] = successes / episodes
+                        scalars["dagger/stable_lift_rate"] = lifts / episodes
+                    training_log.scalars(scalars, step, env_steps=step * steps_per_round)
+                    duration = (perf_counter() - started) / step
+                    print(
+                        f"round {step}/{spec.rounds}: nll={loss_sum / spec.learners:.4f}, "
+                        f"mean_std={mean_std:.4f}, episodes={episodes:g}, "
+                        f"lifts={lifts:g}, successes={successes:g}, seconds/round={duration:.3f}",
+                        flush=True,
                     )
+                counts.zero_()
+            if distributed and step in (1, spec.rounds):
+                _check_replicas(model)
+            if step in (1, spec.rounds) or step % 200 == 0:
+                checkpoint = spec.output / f"dagger-{step}.pt"
+                if training_log is not None:
+                    _checkpoint(checkpoint, step, model, optimizer)
+                    if step in (1, spec.rounds):
+                        verify_fastsac_loading(checkpoint)
+                    training_log.event("checkpoint_saved", step, path=str(checkpoint))
+                if step in EVALUATION_ROUNDS and spec.eval_trials:
+                    if evaluation_log is not None:
+                        report = evaluate_unfiltered(checkpoint, spec.eval_trials, device)
+                        (spec.output / f"eval-{step}.json").write_text(json.dumps(report, indent=2) + "\n")
+                        evaluation_log.scalars(evaluation_scalars(report), step, env_steps=step * steps_per_round)
                     if distributed:
-                        dist.all_reduce(metrics)
-                    loss_sum, mean_std_sum, collect_seconds, episodes, lifts, successes = metrics.tolist()
-                    if rank == 0:
-                        mean_std = mean_std_sum / spec.learners
-                        writer.add_scalar("dagger/nll", loss_sum / spec.learners, step)
-                        writer.add_scalar("dagger/mean_action_std", mean_std, step)
-                        writer.add_scalar(
-                            "dagger/env_steps_per_second",
-                            spec.envs * ROLLOUT_STEPS * spec.learners / collect_seconds,
-                            step,
-                        )
-                        writer.add_scalar("dagger/episodes", episodes, step)
-                        if episodes:
-                            writer.add_scalar("dagger/carry_success_rate", successes / episodes, step)
-                            writer.add_scalar("dagger/stable_lift_rate", lifts / episodes, step)
-                        duration = (perf_counter() - started) / step
-                        print(
-                            f"round {step}/{spec.rounds}: nll={loss_sum / spec.learners:.4f}, "
-                            f"mean_std={mean_std:.4f}, episodes={episodes:g}, "
-                            f"lifts={lifts:g}, successes={successes:g}, seconds/round={duration:.3f}",
-                            flush=True,
-                        )
-                    counts.zero_()
-                if distributed and step in (1, spec.rounds):
-                    _check_replicas(model)
-                if step in (1, spec.rounds) or step % 200 == 0:
-                    checkpoint = spec.output / f"dagger-{step}.pt"
-                    if rank == 0:
-                        _checkpoint(checkpoint, step, model, optimizer)
-                        if step in (1, spec.rounds):
-                            verify_fastsac_loading(checkpoint)
-                    if step in EVALUATION_ROUNDS and spec.eval_trials:
-                        if rank == 0:
-                            report = evaluate_unfiltered(checkpoint, spec.eval_trials, device)
-                            (spec.output / f"eval-{step}.json").write_text(json.dumps(report, indent=2) + "\n")
-                            log_evaluation_scalars(spec.output, report, step)
-                        if distributed:
-                            dist.barrier()
+                        dist.barrier()
+    except KeyboardInterrupt:
+        if metrics is not None:
+            metrics.run("killed")
+        raise
+    except BaseException as exc:
+        if metrics is not None:
+            metrics.run("failed", reason=f"{type(exc).__name__}: {exc}"[:2048])
+        raise
+    else:
+        if metrics is not None:
+            metrics.run("finished")
     finally:
+        if training_log is not None:
+            training_log.close()
+        if evaluation_log is not None:
+            evaluation_log.close()
+        if metrics is not None:
+            metrics.close()
+            metrics.join(EXIT_TIMEOUT)
         if pipe is not None:
             try:
                 pipe.send(False)

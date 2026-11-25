@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 from motrix_env_core.math.quaternion import rotate_inverse
 from motrix_envs.locomotion.wbt.g1.common import G1_TRACKED_BODY_NAMES
@@ -263,16 +262,16 @@ def evaluate_unfiltered(checkpoint: Path, trials: int, device: torch.device) -> 
     return report
 
 
-def log_evaluation_scalars(run_dir: Path, report: dict, step: int) -> None:
-    """Keep evaluation events separate from the active learner's event stream."""
-    with SummaryWriter(run_dir / "evaluation-tb") as writer:
-        for condition, policies in report.items():
-            for policy, stats in policies.items():
-                prefix = f"eval/{condition}/{policy}"
-                count = stats["count"]
-                writer.add_scalar(f"{prefix}/carry_success_rate", stats["successes"] / count, step)
-                writer.add_scalar(f"{prefix}/stable_lift_rate", stats["stable_lifts"] / count, step)
-                writer.add_scalar(f"{prefix}/episodes", count, step)
-                for metric in ("median_box_final_error_m", "first_draw_pass_rate", "first_frame_pass_rate"):
-                    if metric in stats:
-                        writer.add_scalar(f"{prefix}/{metric}", stats[metric], step)
+def evaluation_scalars(report: dict) -> dict[str, float]:
+    values = {}
+    for condition, policies in report.items():
+        for policy, stats in policies.items():
+            prefix = f"eval/{condition}/{policy}"
+            count = stats["count"]
+            values[f"{prefix}/carry_success_rate"] = stats["successes"] / count
+            values[f"{prefix}/stable_lift_rate"] = stats["stable_lifts"] / count
+            values[f"{prefix}/episodes"] = count
+            for metric in ("median_box_final_error_m", "first_draw_pass_rate", "first_frame_pass_rate"):
+                if metric in stats:
+                    values[f"{prefix}/{metric}"] = stats[metric]
+    return values
