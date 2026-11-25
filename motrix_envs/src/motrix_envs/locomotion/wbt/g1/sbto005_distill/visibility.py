@@ -1,4 +1,4 @@
-# Copyright Motphys Technology Co., Ltd. 2026
+# Copyright Motphys Technology Co., Ltd. 2025, 2026
 # SPDX-License-Identifier: Apache-2.0
 
 """Accept only reset placements visible in the student's depth camera."""
@@ -39,7 +39,8 @@ class VisibleBoxResetCfg(BoxResetCfg):
 
 def configure_visible_box(cfg: Sbto005TeacherCfg) -> None:
     cfg.sim_reset.object_state = VisibleBoxResetCfg(
-        body=cfg.sim_reset.object_state.body, initial_yaw_noise=YAW_DEG * (torch.pi / 180)
+        body=cfg.sim_reset.object_state.body,
+        initial_yaw_noise=YAW_DEG * (torch.pi / 180),
     )
     site = cfg.scene.objs.robot.resolve_name(SITE)
     cfg.queries.data.update(
@@ -50,6 +51,9 @@ def configure_visible_box(cfg: Sbto005TeacherCfg) -> None:
 class VisibleBoxEnv(Sbto005TeacherEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.box_pixel_mask = None
+        if not isinstance(self.cfg.sim_reset.object_state, VisibleBoxResetCfg):
+            return
         lens = projection()
         y, x = torch.meshgrid(torch.arange(HEIGHT) + 0.5, torch.arange(WIDTH) + 0.5, indexing="ij")
         self._rays = torch.stack(((x - lens.cx) / lens.fx, (y - lens.cy) / lens.fy, torch.ones_like(x)), -1).flatten(
@@ -94,7 +98,10 @@ class VisibleBoxEnv(Sbto005TeacherEnv):
 
     def _reset_sim_rows(self, env_ids: torch.Tensor, episode_reset: torch.Tensor) -> None:
         super()._reset_sim_rows(env_ids, episode_reset)
+        if self.box_pixel_mask is None:
+            return
         rows = env_ids[episode_reset]
+        rows = rows[self.command_terms["motion"].steps[rows, 0] == 0]
         if not rows.numel():
             return
 
@@ -114,7 +121,10 @@ class VisibleBoxEnv(Sbto005TeacherEnv):
                 break
             if attempt:
                 self.visibility_counts["pose_retries"] += len(pending)
-                super()._reset_sim_rows(pending, torch.ones_like(pending, dtype=torch.bool))
+                # Refresh pose noise without selecting a new reference or counting the failure twice.
+                self._sim_reset_runtime.apply(
+                    self._task_program, pending, torch.ones_like(pending, dtype=torch.bool), reset_commands=False
+                )
                 rotations[pending] = initial_rotation[pending]
                 self._refresh_box_reset(pending)
                 pending = self._unseen(pending)

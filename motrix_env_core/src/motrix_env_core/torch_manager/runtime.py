@@ -96,7 +96,7 @@ class TorchTaskProgram:
 
     evaluate_kernel: Callable[[torch.Tensor, tuple[torch.Tensor, ...], EvaluationOutputs], None]
     observe_kernel: Callable[[EnvObs], None]
-    reset_kernel: Callable[[torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]], None]
+    reset_kernel: Callable[..., None]
     reward_weights: torch.Tensor
 
 
@@ -196,7 +196,11 @@ class TorchManagerRuntime:
         kernel(outputs)
 
     def reset(
-        self, env_ids: torch.Tensor, episode_reset: torch.Tensor, reset_buffers: tuple[torch.Tensor, ...]
+        self,
+        env_ids: torch.Tensor,
+        episode_reset: torch.Tensor,
+        reset_buffers: tuple[torch.Tensor, ...],
+        reset_commands: bool = True,
     ) -> None:
         if not self.command_reset_hooks and not self._reset_terms:
             return
@@ -205,7 +209,8 @@ class TorchManagerRuntime:
         # caller's device, dtype, layout, or autograd history.
         ids = env_ids.detach().to(device=self.ctx.env_id.device, dtype=torch.int64).contiguous()
         kernel = self._compiled_kernels.get_or_build(
-            ("reset", id(reset_buffers)), lambda: self._build_compiled_reset(reset_buffers)
+            ("reset", id(reset_buffers), reset_commands),
+            lambda: self._build_compiled_reset(reset_buffers, reset_commands),
         )
         kernel(ids, episode_reset)
 
@@ -299,7 +304,7 @@ class TorchManagerRuntime:
         return kernel
 
     def _build_compiled_reset(
-        self, reset_buffers: tuple[torch.Tensor, ...]
+        self, reset_buffers: tuple[torch.Tensor, ...], reset_commands: bool
     ) -> Callable[[torch.Tensor, torch.Tensor], None]:
         """Compile the reset schedule as a dynamic gather-compact graph.
 
@@ -314,7 +319,7 @@ class TorchManagerRuntime:
         random draws through ``ctx.rand`` inside the numerical graph.
         """
         ctx = self.ctx
-        command_reset_hooks = self.command_reset_hooks
+        command_reset_hooks = self.command_reset_hooks if reset_commands else ()
         write_plan = tuple(
             (
                 call,

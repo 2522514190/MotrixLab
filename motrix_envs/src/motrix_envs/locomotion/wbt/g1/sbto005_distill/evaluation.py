@@ -63,12 +63,22 @@ def score(position, speed, reference, complete):
 
 
 @torch.no_grad()
-def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_yaw, blind, *, noise_strength=None):
-    visible_box = noise_strength is not None
-    env = make_env(count, seed, evaluation=True, box_xy=box_xy, box_yaw=box_yaw, visible_box=visible_box)
+def evaluate_batch(
+    count, seed, device, teacher_path, student_path, box_xy, box_yaw, blind, *, noise_strength=None, unfiltered=False
+):
+    visible_box = noise_strength is not None and not unfiltered
+    env = make_env(
+        count,
+        seed,
+        evaluation=True,
+        box_xy=box_xy,
+        box_yaw=box_yaw,
+        visible_box=visible_box,
+        unfiltered_box=unfiltered and bool(box_xy),
+    )
     sim = env.sim_data
     state = env.init_state()
-    noise = DepthNoise(count, device, seed + 89471) if visible_box else None
+    noise = DepthNoise(count, device, seed + 89471) if noise_strength is not None else None
     all_rows = torch.arange(count)
     empty_rows = all_rows[:0]
     columns = student_terms(env)
@@ -99,7 +109,10 @@ def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_
         else:
             if noise is not None:
                 depth = noise.frame(
-                    sim[DEPTH], all_rows if frame == 0 else empty_rows, env.box_pixel_mask, noise_strength
+                    sim[DEPTH],
+                    all_rows if frame == 0 else empty_rows,
+                    env.box_pixel_mask if visible_box else None,
+                    noise_strength,
                 )
             else:
                 depth = student_depth(sim[DEPTH])
@@ -124,7 +137,7 @@ def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_
             break
 
     positions, speed, error = (torch.stack(trace).numpy() for trace in (pos, speeds, body_sq))
-    if noise is not None:
+    if visible_box:
         clean_pixels = env.box_pixel_mask.flatten(1).sum(dim=1).tolist()
         delivered_pixels = noise.first_box_pixels.tolist()
         first_draw = env.box_first_draw.tolist()
@@ -139,7 +152,7 @@ def evaluate_batch(count, seed, device, teacher_path, student_path, box_xy, box_
             body_relative_rms_m=float(np.sqrt(error[:length, lane].mean())),
             failure_terms=[name for name, mask in failure_masks.items() if mask[lane]],
         )
-        if noise is not None:
+        if visible_box:
             row.update(
                 first_draw_visible=first_draw[lane],
                 first_clean_pixels=clean_pixels[lane],
@@ -222,6 +235,31 @@ def evaluate_camera_dr(teacher: Path, student: Path, trials: int, device: torch.
         summary = _summarize(rows)
         report[condition] = {policy_name: summary}
         print(condition, policy_name, {k: v for k, v in summary.items() if k != "trials"}, flush=True)
+    return report
+
+
+def evaluate_unfiltered(checkpoint: Path, trials: int, device: torch.device) -> dict:
+    report = {}
+    for condition, xy, yaw in (("fixed_box", 0.0, 0.0), ("box_dr", 0.10, 30.0)):
+        rows = []
+        for start in range(0, trials, 32):
+            rows.extend(
+                evaluate_batch(
+                    min(32, trials - start),
+                    1001 + start,
+                    device,
+                    None,
+                    checkpoint,
+                    xy,
+                    yaw,
+                    False,
+                    noise_strength=1.0,
+                    unfiltered=True,
+                )
+            )
+        summary = _summarize(rows)
+        report[condition] = {"student": summary}
+        print(condition, {key: value for key, value in summary.items() if key != "trials"}, flush=True)
     return report
 
 

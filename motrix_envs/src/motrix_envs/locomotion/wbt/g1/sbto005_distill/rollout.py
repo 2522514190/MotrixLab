@@ -4,6 +4,7 @@
 """Own pre-step student observations and label them with the frozen teacher."""
 
 import os
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,7 +13,9 @@ from time import perf_counter
 import torch
 from motrix_rl_builtin.fastsac.wrap import FastSacEnvWrap
 
+from motrix_env_core.config import configclass
 from motrix_env_core.sim.read import LinkPositionQuery, LinkQuaternionQuery
+from motrix_envs.locomotion.wbt.cfg import ObservationsCfg
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.camera import (
     DEPTH,
     HEIGHT,
@@ -22,10 +25,24 @@ from motrix_envs.locomotion.wbt.g1.sbto005_distill.camera import (
     student_depth,
 )
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.depth_noise import RAMP_STEPS, DepthNoise
-from motrix_envs.locomotion.wbt.g1.sbto005_distill.policy import ACTION_SIZE, STATE_SIZE, STATE_TERMS, Student
-from motrix_envs.locomotion.wbt.g1.sbto005_distill.visibility import VisibleBoxEnv, configure_visible_box
-from motrix_envs.locomotion.wbt.g1.sbto005_teacher import TASK, Sbto005TeacherEnv, make_sbto005_teacher_cfg
+from motrix_envs.locomotion.wbt.g1.sbto005_distill.policy import ACTION_SIZE, STATE_SIZE, Student, student_terms
+from motrix_envs.locomotion.wbt.g1.sbto005_distill.visibility import (
+    VisibleBoxEnv,
+    VisibleBoxResetCfg,
+    configure_visible_box,
+)
+from motrix_envs.locomotion.wbt.g1.sbto005_teacher import (
+    TASK,
+    Sbto005TeacherEnv,
+    TeacherObservationsCfg,
+    make_sbto005_teacher_cfg,
+)
 from motrix_rl import runner, runs
+
+
+@configclass
+class DistillationObservationsCfg(TeacherObservationsCfg):
+    student_state: ObservationsCfg.PolicyCfg = ObservationsCfg.PolicyCfg()
 
 
 class EvaluationEnv(Sbto005TeacherEnv):
@@ -72,15 +89,6 @@ class Samples:
         return Samples(self.state.to(device), self.depth.to(device, dtype=torch.float32), self.action.to(device))
 
 
-def student_terms(env: Sbto005TeacherEnv) -> torch.Tensor:
-    layout = env.manager_layout.observations["policy"]
-    slices = {term.name: term.output_slice for term in layout.terms}
-    columns = torch.cat([torch.arange(slices[name].start, slices[name].stop) for name in STATE_TERMS])
-    if columns.numel() != STATE_SIZE or env.observation_spec.policy.space.shape != (172,):
-        raise ValueError("Unexpected SBTO005 Teacher/Student observation layout.")
-    return columns
-
-
 def make_env(
     count: int,
     seed: int,
@@ -91,6 +99,9 @@ def make_env(
     box_yaw: float = 30.0,
     perturbations: bool = True,
     visible_box: bool = False,
+    unfiltered_box: bool = False,
+    clean_teacher: bool = False,
+    env_type: type[Sbto005TeacherEnv] = Sbto005TeacherEnv,
 ) -> Sbto005TeacherEnv:
     torch.manual_seed(seed)
     cfg = make_sbto005_teacher_cfg()
@@ -103,6 +114,18 @@ def make_env(
         duration = cfg.max_episode_seconds
         cfg = cfg.for_play()
         cfg.max_episode_seconds = duration
+    if unfiltered_box:
+        cfg.sim_reset.object_state = VisibleBoxResetCfg(
+            body=cfg.sim_reset.object_state.body,
+            initial_yaw_noise=box_yaw * (torch.pi / 180),
+        )
+    if clean_teacher:
+        policy = deepcopy(cfg.observations.policy)
+        for term in (policy.motion_ref_ori_b, policy.base_ang_vel, policy.dof_pos, policy.dof_vel):
+            term.noise.amplitude = 0.0
+        policy.box_pose.noise = 0.0
+        policy.box_pose_error.noise = 0.0
+        cfg.observations = DistillationObservationsCfg(policy=policy, value=cfg.observations.value)
     if evaluation:
         base = cfg.scene.objs.robot.resolved_base_link_name
         cfg.queries.data.update(
@@ -119,7 +142,7 @@ def make_env(
             configure_visible_box(cfg)
             env_cls = VisibleEvaluationEnv if evaluation else VisibleBoxEnv
         else:
-            env_cls = EvaluationEnv if evaluation else Sbto005TeacherEnv
+            env_cls = EvaluationEnv if evaluation else env_type
         return env_cls(cfg, num_envs=count, backend="motrixsim", seed=seed, headless=True)
 
 

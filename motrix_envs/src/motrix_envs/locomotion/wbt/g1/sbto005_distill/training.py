@@ -217,7 +217,7 @@ def _join(a, b):
 
 
 def _pin(rank, learners):
-    if learners == 2 and hasattr(os, "sched_getaffinity"):
+    if learners > 1 and hasattr(os, "sched_getaffinity"):
         cpus = sorted(os.sched_getaffinity(0))
         if len(cpus) >= learners:
             start = len(cpus) * rank // learners

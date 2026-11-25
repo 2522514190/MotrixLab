@@ -10,11 +10,13 @@ from math import log, pi
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
+from types import SimpleNamespace
 
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from motrix_rl_builtin.fastsac.sbto005_actor import OBS_SIZE, Sbto005Actor
+from motrix_rl_builtin.fastsac.networks import build_actor, initialize_actor
+from motrix_rl_builtin.fastsac.sbto005_actor import OBS_SIZE
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 
@@ -37,12 +39,13 @@ from motrix_envs.locomotion.wbt.g1.sbto005_distill.rollout import (
     make_teacher,
 )
 from motrix_envs.locomotion.wbt.g1.sbto005_distill.training import _observation_totals, _pin, _set_normalization, sha256
+from motrix_envs.locomotion.wbt.g1.sbto005_teacher import Sbto005TeacherEnv
 
 ROLLOUT_STEPS = 24
 EVALUATION_ROUNDS = (2000, 5000, 10000)
 
 
-class ScoredEnv:
+class ScoredEnv(Sbto005TeacherEnv):
     """Track the closed-loop lift and setdown criteria before auto-reset."""
 
     def init_state(self):
@@ -140,6 +143,7 @@ def _collector(spec, rank, device, pipe, buffer, weights):
 def _update(ddp, model, optimizer, samples, device):
     optimizer.zero_grad(set_to_none=True)
     total = torch.zeros((), device=device)
+    std_total = torch.zeros_like(total)
     count = len(samples.state)
     # Accumulate the exact full-rollout gradient in bounded chunks.
     for start in range(0, count, 2048):
@@ -152,10 +156,10 @@ def _update(ddp, model, optimizer, samples, device):
             loss = (0.5 * residual.square() + log_std + 0.5 * log(2 * pi)).sum(dim=1).sum() / count
             loss.backward()
         total += loss.detach()
+        std_total += log_std.detach().exp().sum()
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
     optimizer.step()
-    with torch.no_grad():
-    return total
+    return total, std_total / (count * ACTION_SIZE)
 
 
 def _check_replicas(model):
@@ -181,33 +185,39 @@ def _checkpoint(path, step, model, optimizer):
     staging.replace(path)
 
 
+@torch.no_grad()
 def verify_fastsac_loading(path):
-    from types import SimpleNamespace
-
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     state = checkpoint["student"]
-    cfg = SimpleNamespace(use_tanh=True, log_std_min=LOG_STD_MIN, log_std_max=LOG_STD_MAX)
-    actor = Sbto005Actor(cfg, OBS_SIZE, len(state["center"]), state["half_range"], state["center"], "cpu")
-    actor.initialize_from_distillation(path)
-    student = GaussianStudent(actor.student)
+    bias, scale = state["center"], state["half_range"]
+    cfg = SimpleNamespace(
+        actor_type="sbto005_depth",
+        actor_init=str(path),
+        use_tanh=True,
+        log_std_min=LOG_STD_MIN,
+        log_std_max=LOG_STD_MAX,
+    )
+    actor = build_actor(cfg, OBS_SIZE, ACTION_SIZE, scale, bias, "cpu")
+    initialize_actor(actor, cfg)
+    student = GaussianStudent(Student(bias - scale, bias + scale))
+    student.student.load_state_dict(state)
     student.fc_logstd.load_state_dict(checkpoint["fc_logstd"])
-    
+
     generator = torch.Generator().manual_seed(2026)
     obs = torch.rand((8, OBS_SIZE), generator=generator)
     student_state = obs[:, :STATE_SIZE]
     depth = obs[:, STATE_SIZE:].reshape(-1, 1, HEIGHT, WIDTH)
-    
-    with torch.no_grad():
-        action_actor, mean_actor, log_std_actor = actor(obs)
-        mean_student, log_std_student = student(student_state, depth)
-        
-        torch.testing.assert_close(action_actor, student.student(student_state, depth))
-        torch.testing.assert_close(log_std_actor, log_std_student, rtol=1e-4, atol=1e-5)
-        
-        sampled = student.sample(student_state, depth, torch.Generator().manual_seed(1))
-        noise = torch.randn(mean_actor.shape, generator=torch.Generator().manual_seed(1))
-        expected = (mean_actor + log_std_actor.exp() * noise).tanh() * actor.action_scale + actor.action_bias
-        torch.testing.assert_close(sampled, expected, rtol=1e-5, atol=3e-6)
+
+    action_actor, mean_actor, log_std_actor = actor(obs)
+    mean_student, log_std_student = student(student_state, depth)
+    torch.testing.assert_close(action_actor, student.student(student_state, depth))
+    torch.testing.assert_close(mean_actor, mean_student)
+    torch.testing.assert_close(log_std_actor, log_std_student)
+
+    sampled = student.sample(student_state, depth, torch.Generator().manual_seed(1))
+    noise = torch.randn(mean_actor.shape, generator=torch.Generator().manual_seed(1))
+    expected = (mean_actor + log_std_actor.exp() * noise).tanh() * actor.action_scale + actor.action_bias
+    torch.testing.assert_close(sampled, expected, rtol=1e-5, atol=3e-6)
 
 
 def _train_rank(rank, spec, rendezvous):
@@ -264,19 +274,23 @@ def _train_rank(rank, spec, rendezvous):
                     dist.all_reduce(stats)
                 totals += stats
                 _set_normalization(model.student, totals)
-                loss = _update(ddp, model, optimizer, samples, device)
+                loss, mean_std = _update(ddp, model, optimizer, samples, device)
                 counts += torch.tensor(outcomes)
                 if step == 1 or step % 10 == 0 or step == spec.rounds:
-                    metrics = torch.tensor([float(loss), seconds, *counts.tolist()], dtype=torch.float64, device=device)
+                    metrics = torch.tensor(
+                        [float(loss), float(mean_std), seconds, *counts.tolist()], dtype=torch.float64, device=device
+                    )
                     if distributed:
                         dist.all_reduce(metrics)
-                    loss_sum, collect_seconds, episodes, lifts, successes = metrics.tolist()
+                    loss_sum, mean_std_sum, collect_seconds, episodes, lifts, successes = metrics.tolist()
                     if rank == 0:
+                        mean_std = mean_std_sum / spec.learners
                         writer.add_scalar("dagger/nll", loss_sum / spec.learners, step)
-                        writer.add_scalar("dagger/mean_action_std", model.fc_logstd.bias.exp().mean().item(), step)
+                        writer.add_scalar("dagger/mean_action_std", mean_std, step)
                         writer.add_scalar(
                             "dagger/env_steps_per_second",
                             spec.envs * ROLLOUT_STEPS * spec.learners / collect_seconds,
+                            step,
                         )
                         writer.add_scalar("dagger/episodes", episodes, step)
                         if episodes:
@@ -285,7 +299,7 @@ def _train_rank(rank, spec, rendezvous):
                         duration = (perf_counter() - started) / step
                         print(
                             f"round {step}/{spec.rounds}: nll={loss_sum / spec.learners:.4f}, "
-                            f"mean_std={model.fc_logstd.bias.exp().mean().item():.4f}, episodes={episodes:g}, "
+                            f"mean_std={mean_std:.4f}, episodes={episodes:g}, "
                             f"lifts={lifts:g}, successes={successes:g}, seconds/round={duration:.3f}",
                             flush=True,
                         )

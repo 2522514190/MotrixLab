@@ -97,10 +97,15 @@ class SimResetRuntime:
         task_program: TorchTaskProgram,
         env_ids: torch.Tensor,
         episode_reset: torch.Tensor,
+        *,
+        reset_commands: bool = True,
     ) -> None:
         """Materialize compact term outputs, scatter them, and execute reset."""
         with active_perf_scope("reset_kernel"):
-            task_program.reset_kernel(env_ids, episode_reset, self.buffers)
+            if reset_commands:
+                task_program.reset_kernel(env_ids, episode_reset, self.buffers)
+            else:
+                task_program.reset_kernel(env_ids, episode_reset, self.buffers, False)
         for buffer in self.buffers:
             compact = buffer[: env_ids.numel()].clone()
             buffer[env_ids] = compact

@@ -238,3 +238,32 @@ class Critic(nn.Module):
 
     def get_value(self, probs: torch.Tensor) -> torch.Tensor:
         return torch.sum(probs * self.q_support, dim=-1)
+
+
+def build_actor(cfg, n_obs, n_act, action_scale, action_bias, device) -> Actor:
+    if cfg.actor_type == "sbto005_depth":
+        from motrix_rl_builtin.fastsac.sbto005_actor import Sbto005Actor
+
+        return Sbto005Actor(cfg, n_obs, n_act, action_scale, action_bias, device)
+    if cfg.actor_type != "mlp":
+        raise ValueError(f"Unknown FastSAC actor type: {cfg.actor_type}")
+    return Actor(
+        n_obs,
+        n_act,
+        cfg.actor_hidden_dim,
+        cfg.log_std_max,
+        cfg.log_std_min,
+        cfg.use_tanh,
+        cfg.use_layer_norm,
+        action_scale,
+        action_bias,
+        device,
+    )
+
+
+def initialize_actor(actor: Actor, cfg) -> None:
+    """Apply a fresh-run policy initialization before collection starts."""
+    if cfg.actor_type == "sbto005_depth":
+        if not cfg.actor_init:
+            raise ValueError("Set MOTRIX_SBTO005_STUDENT_INIT to the distilled Student checkpoint.")
+        actor.initialize_from_distillation(cfg.actor_init)

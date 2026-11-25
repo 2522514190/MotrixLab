@@ -1,4 +1,4 @@
-# Copyright Motphys Technology Co., Ltd. 2026
+# Copyright Motphys Technology Co., Ltd. 2025, 2026
 # SPDX-License-Identifier: Apache-2.0
 
 """Student-side RealSense depth perturbations with lane-local episode history."""
@@ -49,10 +49,30 @@ class DepthNoise:
             drop |= (counts > index) & rect
         return image.masked_fill(drop.unsqueeze(1), 1.0)
 
-    def frame(self, raw_depth, fresh, box_pixel_mask, strength: float):
+    def frame(self, raw_depth, fresh, box_pixel_mask, strength: float, *, protect=None):
         """Return the exact fp16-quantized image stored in the DAgger replay."""
         clean = student_depth(raw_depth.to(self.device))
         fresh_dev = fresh.to(self.device)
+        protect = (fresh if box_pixel_mask is not None else fresh[:0]) if protect is None else protect
+        image, noisy = self._spatial_noise(clean, strength)
+
+        if protect.numel():
+            self._protect_box(image, noisy, protect, box_pixel_mask, strength)
+
+        self._history[self._slot].copy_(image)
+        self._history[:, fresh_dev] = image[fresh_dev]
+        self._delivered[fresh_dev] = image[fresh_dev]
+        self._delivered.copy_(self._temporal_noise(image, self._rows, strength))
+        self._slot = (self._slot + 1) % (MAX_LAG + 1)
+        return self._delivered.half()
+
+    def preview(self, raw_depth, rows, strength: float):
+        """Sample a pre-reset frame while leaving live lane history untouched."""
+        clean = student_depth(raw_depth.to(self.device))
+        image, _ = self._spatial_noise(clean, strength)
+        return self._temporal_noise(image, rows.to(self.device), strength).half()
+
+    def _spatial_noise(self, clean, strength):
         if strength > 0.0:
             gaussian = torch.randn(clean.shape, generator=self._rng, device=self.device) * (GAUSSIAN_STD * strength)
             # Keep the invalid-depth sentinel distinct, including after replay quantization.
@@ -62,41 +82,40 @@ class DepthNoise:
             noisy = clean
             image = clean
 
-        if fresh.numel():
-            mask = box_pixel_mask[fresh].to(self.device)
-            pixels = ((image[fresh_dev].half() < 1) & mask).flatten(1).sum(1)
-            missing = torch.nonzero(pixels < MIN_BOX_PIXELS).flatten()
-            for _ in range(MASK_RETRIES):
-                if not missing.numel():
-                    break
-                rows = fresh_dev[missing]
-                images = self._dropout(noisy[rows], strength)
-                image[rows] = images
-                pixels[missing] = ((images.half() < 1) & mask[missing]).flatten(1).sum(1)
-                missing = missing[pixels[missing] < MIN_BOX_PIXELS]
-            if missing.numel():
-                self.first_frame_fallbacks += len(missing)
-                rows = fresh_dev[missing]
-                image[rows] = noisy[rows]
-                pixels[missing] = ((image[rows].half() < 1) & mask[missing]).flatten(1).sum(1)
-            counts = pixels.cpu()
-            passed = int((counts >= MIN_BOX_PIXELS).sum())
-            if passed != len(fresh):
-                raise RuntimeError(f"First student depth frame is missing the required box pixels: {counts.tolist()}")
-            self.first_frames += len(fresh)
-            self.first_frame_passes += passed
-            self.first_box_pixels[fresh] = counts
+        return image, noisy
 
-        self._history[self._slot].copy_(image)
-        self._history[:, fresh_dev] = image[fresh_dev]
-        self._delivered[fresh_dev] = image[fresh_dev]
-        if strength > 0.0:
-            lag = torch.randint(MAX_LAG + 1, self._rows.shape, generator=self._rng, device=self.device)
-            lag *= self._uniform(len(lag)) < strength
-            delayed = self._history[(self._slot - lag) % (MAX_LAG + 1), self._rows]
-            hold = self._uniform(len(lag)) < HOLD_PROB * strength
-            self._delivered.copy_(torch.where(hold[:, None, None, None], self._delivered, delayed))
-        else:
-            self._delivered.copy_(image)
-        self._slot = (self._slot + 1) % (MAX_LAG + 1)
-        return self._delivered.half()
+    def _protect_box(self, image, noisy, fresh, box_pixel_mask, strength):
+        fresh_dev = fresh.to(self.device)
+        mask = box_pixel_mask[fresh].to(self.device)
+        pixels = ((image[fresh_dev].half() < 1) & mask).flatten(1).sum(1)
+        missing = torch.nonzero(pixels < MIN_BOX_PIXELS).flatten()
+        for _ in range(MASK_RETRIES):
+            if not missing.numel():
+                break
+            rows = fresh_dev[missing]
+            images = self._dropout(noisy[rows], strength)
+            image[rows] = images
+            pixels[missing] = ((images.half() < 1) & mask[missing]).flatten(1).sum(1)
+            missing = missing[pixels[missing] < MIN_BOX_PIXELS]
+        if missing.numel():
+            self.first_frame_fallbacks += len(missing)
+            rows = fresh_dev[missing]
+            image[rows] = noisy[rows]
+            pixels[missing] = ((image[rows].half() < 1) & mask[missing]).flatten(1).sum(1)
+        counts = pixels.cpu()
+        passed = int((counts >= MIN_BOX_PIXELS).sum())
+        if passed != len(fresh):
+            raise RuntimeError(f"First student depth frame is missing the required box pixels: {counts.tolist()}")
+        self.first_frames += len(fresh)
+        self.first_frame_passes += passed
+        self.first_box_pixels[fresh] = counts
+
+    def _temporal_noise(self, image, rows, strength):
+        if strength <= 0.0:
+            return image
+        lag = torch.randint(MAX_LAG + 1, rows.shape, generator=self._rng, device=self.device)
+        lag *= self._uniform(len(lag)) < strength
+        delayed = self._history[(self._slot - lag) % (MAX_LAG + 1), rows]
+        delayed = torch.where((lag == 0)[:, None, None, None], image, delayed)
+        hold = self._uniform(len(lag)) < HOLD_PROB * strength
+        return torch.where(hold[:, None, None, None], self._delivered[rows], delayed)

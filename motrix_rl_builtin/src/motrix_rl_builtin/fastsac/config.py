@@ -20,6 +20,13 @@ class FastSacAgentCfg:
 
     # actor / critic networks
     actor_hidden_dim: int = MISSING
+    actor_type: str = "mlp"
+    actor_init: str = ""
+
+    @property
+    def running_actor_normalization(self) -> bool:
+        return self.obs_normalization and self.actor_type == "mlp"
+
     critic_hidden_dim: int = MISSING
     num_q_networks: int = MISSING
     use_layer_norm: bool = MISSING
