@@ -156,7 +156,7 @@ def test_mujoco_compiler_lowers_scene_objects_sensors_and_sim_options(tmp_path):
         contacts: ContactSensorCfg = ContactSensorCfg(
             geom1="floor",
             geom2="robot_foot",
-            num=2,
+            num=4,
             data=[ContactReportField.found, ContactReportField.force, ContactReportField.dist],
             reduce=ContactSensorReduce.maxforce,
         )
@@ -181,7 +181,8 @@ def test_mujoco_compiler_lowers_scene_objects_sensors_and_sim_options(tmp_path):
     assert floor_id >= 0
     assert model.geom_pos[floor_id] == pytest.approx([0.0, 0.0, 0.25])
     assert model.sensor_type[contact_sensor_id] == mj.mjtSensor.mjSENS_CONTACT
-    assert model.sensor_intprm[contact_sensor_id].tolist() == [11, 2, 2]
+    assert model.sensor_intprm[contact_sensor_id].tolist() == [11, 2, 4]
+    assert model.sensor_dim[contact_sensor_id] == 4 * (1 + 3 + 1)
     assert model.sensor_type[frame_sensor_id] == mj.mjtSensor.mjSENS_FRAMEPOS
     assert model.opt.timestep == pytest.approx(0.005)
     assert model.opt.iterations == 7

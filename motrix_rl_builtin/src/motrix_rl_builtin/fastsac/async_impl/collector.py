@@ -71,6 +71,7 @@ class Collector:
         collector_id: int = 0,
     ):
         self.env = env
+        self._set_training_iteration = getattr(env, "set_training_iteration", None)
         self.cfg = cfg
         self.async_options = cfg.trainer.async_options
         acfg: FastSacAgentCfg = cfg.agent
@@ -244,6 +245,8 @@ class Collector:
         t_sample = time.perf_counter()
         actions = self._sample_actions(warming)
         t_env = time.perf_counter()
+        if self._set_training_iteration is not None:
+            self._set_training_iteration(steps)
         result = self.env.step(actions)
         t_payload = time.perf_counter()
         final_payload = None

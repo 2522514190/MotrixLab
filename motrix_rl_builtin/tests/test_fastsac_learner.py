@@ -15,6 +15,7 @@ def _tiny_agent_cfg(**overrides):
         actor_learning_rate=1e-3,
         critic_learning_rate=1e-3,
         alpha_learning_rate=1e-3,
+        override_resume_learning_rates=False,
         weight_decay=0.0,
         max_grad_norm=0.0,
         use_layer_norm=False,
@@ -43,6 +44,40 @@ def _tiny_agent_cfg(**overrides):
     )
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_resume_can_override_learning_rates_while_restoring_optimizer_state() -> None:
+    import torch
+    from motrix_rl_builtin.fastsac.agent import FastSacAgent
+
+    dims = dict(obs_dim=5, critic_obs_dim=7, act_dim=3, num_envs=8, device=torch.device("cpu"))
+    source = FastSacAgent(**dims, cfg=_tiny_agent_cfg())
+    source.global_step = 42
+    names = ("actor_optimizer", "q_optimizer", "alpha_optimizer")
+    for name in names:
+        optimizer = getattr(source, name)
+        param = optimizer.param_groups[0]["params"][0]
+        param.grad = torch.ones_like(param)
+        optimizer.step()
+    checkpoint = source.state_dict()
+    rates = (1e-4, 2e-4, 3e-4)
+
+    for override in (False, True):
+        resumed = FastSacAgent(
+            **dims,
+            cfg=_tiny_agent_cfg(
+                actor_learning_rate=rates[0],
+                critic_learning_rate=rates[1],
+                alpha_learning_rate=rates[2],
+                override_resume_learning_rates=override,
+            ),
+        )
+        resumed.load_state_dict(checkpoint)
+        assert resumed.global_step == source.global_step
+        for name, rate in zip(names, rates, strict=True):
+            state = resumed.state_dict()[name]
+            assert state["param_groups"][0]["lr"] == (rate if override else checkpoint[name]["param_groups"][0]["lr"])
+            torch.testing.assert_close(state["state"], checkpoint[name]["state"])
 
 
 def test_policy_frequency_gating_spans_update_calls() -> None:

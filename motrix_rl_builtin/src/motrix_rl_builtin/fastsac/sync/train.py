@@ -201,6 +201,7 @@ class Trainer(TrainerBase):
         agent.set_train_mode()
 
         obs, critic_obs = env.reset()
+        set_training_iteration = getattr(env, "set_training_iteration", None)
         ep_return = torch.zeros(agent.num_envs, device=device)
         ep_len = torch.zeros(agent.num_envs, device=device)
         episode_window = EpisodeWindow(max_episodes=100)
@@ -241,6 +242,8 @@ class Trainer(TrainerBase):
                 else:
                     actions = agent.act(obs, deterministic=False)
 
+                if set_training_iteration is not None:
+                    set_training_iteration(agent.global_step)
                 result = env.step(actions)
                 next_obs, next_critic_obs = result.obs, result.critic_obs
                 rewards, terminated, truncated = result.reward, result.terminated, result.truncated

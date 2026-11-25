@@ -326,7 +326,7 @@ class MuJoCoSceneCompiler(SceneCompiler[mj.MjModel]):
                 objname=cfg.geom1,
                 reftype=mj.mjtObj.mjOBJ_GEOM,
                 refname=cfg.geom2,
-                intprm=[data_mask, cfg.num, _CONTACT_REDUCE[cfg.reduce]],
+                intprm=[data_mask, _CONTACT_REDUCE[cfg.reduce], cfg.num],
             )
             return
         if isinstance(cfg, FrameSensorCfg):

@@ -473,7 +473,9 @@ class FastSacAgent:
         Loads networks, ``log_alpha`` and both normalizers unconditionally. With
         ``load_optimizers=False`` (or when the checkpoint predates optimizer
         serialization) the optimizer states are skipped — the mode for
-        inference-only / play loads that don't resume training.
+        inference-only / play loads that don't resume training. Setting
+        ``override_resume_learning_rates`` applies the configured rates after
+        restoring each optimizer's state.
         """
         self.actor.load_state_dict(ckpt["actor"])
         self.qnet.load_state_dict(ckpt["qnet"])
@@ -483,11 +485,16 @@ class FastSacAgent:
         self.critic_obs_normalizer.load_state_dict(ckpt["critic_obs_normalizer"])
         # optimizer states are optional (older checkpoints / inference-only loads)
         if load_optimizers:
-            if "q_optimizer" in ckpt:
-                self.q_optimizer.load_state_dict(ckpt["q_optimizer"])
-            if "actor_optimizer" in ckpt:
-                self.actor_optimizer.load_state_dict(ckpt["actor_optimizer"])
-            if "alpha_optimizer" in ckpt:
-                self.alpha_optimizer.load_state_dict(ckpt["alpha_optimizer"])
+            optimizers = (
+                ("q_optimizer", self.q_optimizer, self.cfg.critic_learning_rate),
+                ("actor_optimizer", self.actor_optimizer, self.cfg.actor_learning_rate),
+                ("alpha_optimizer", self.alpha_optimizer, self.cfg.alpha_learning_rate),
+            )
+            for name, optimizer, learning_rate in optimizers:
+                if name in ckpt:
+                    optimizer.load_state_dict(ckpt[name])
+                    if self.cfg.override_resume_learning_rates:
+                        for group in optimizer.param_groups:
+                            group["lr"] = learning_rate
         self.global_step = ckpt.get("global_step", 0)
         self.update_idx = ckpt.get("update_idx", self.update_idx)

@@ -19,3 +19,4 @@ build/
 dist/
 *.so
 *.egg-info/
+指令.txt

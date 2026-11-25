@@ -49,6 +49,9 @@ class FastSacEnvWrap:
             raise TypeError("FastSAC supports only Box action spaces.")
 
         self._env = env
+        # Optional environment callback. Training providers supply the current
+        # collector iteration, including the offset restored from a checkpoint.
+        self.set_training_iteration = getattr(env, "set_training_iteration", None)
         self.device = device
         self.num_envs = env.num_envs
         # Bounds live on CPU alongside the env-bound actions clamped in step.
